@@ -230,6 +230,9 @@ SQL rules (DuckDB dialect):
 - For a "trend over time" question, return ALL periods ordered ascending. NEVER add
   LIMIT 1 (or any LIMIT that cuts off periods) to a trend/time-series query.
 - Use the metric definitions in the semantic layer verbatim rather than re-deriving them.
+- Return ONLY the columns the question asks for -- the grouping key(s) and the requested
+  metric. Do NOT add extra helper columns (e.g. intermediate totals used to compute a ratio)
+  unless the question asks for them.
 
 Examples (patterns only -- adapt table/column names to the actual question):
 
@@ -262,6 +265,14 @@ SQL: SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.quantity) AS units_
      GROUP BY month
      ORDER BY month;  -- no LIMIT: a trend needs every period
 
+Q: "What is the profit margin for each city?"
+SQL: SELECT o.city, SUM(oi.profit) / NULLIF(SUM(oi.amount), 0) AS profit_margin
+     FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+     GROUP BY o.city
+     ORDER BY profit_margin DESC;
+     -- only [city, profit_margin] -- do NOT also select the intermediate
+     -- SUM(profit) / SUM(amount) totals, even though they were used to compute it.
+
 === SEMANTIC LAYER ===
 {semantic_layer}
 === END SEMANTIC LAYER ==="""
@@ -288,14 +299,15 @@ def answer_question(
     history: list[dict] | None = None,
     client: OpenAI | None = None,
     temperature: float | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Answer one natural-language question over the warehouse.
 
     Returns {"answer_text": str, "sql": str | None, "rows": list[dict], "trace": list[str]}.
     `history` is a flat list of prior {"role": "user"|"assistant", "content": str} turns; pass
     None (default) for a stateless single-shot call, e.g. from an eval harness.
-    `temperature` is passed straight to the LLM call (e.g. 0 for deterministic eval runs);
-    None uses the provider default.
+    `temperature` and `seed` are passed straight to the LLM call (e.g. temperature=0, seed=0
+    for deterministic eval runs); None uses the provider default for each.
     """
     history = history or []
 
@@ -320,6 +332,8 @@ def answer_question(
     completion_kwargs: dict = {"extra_body": {"options": {"num_ctx": NUM_CTX}}}
     if temperature is not None:
         completion_kwargs["temperature"] = temperature
+    if seed is not None:
+        completion_kwargs["seed"] = seed
 
     try:
         for _ in range(MAX_TOOL_ITERATIONS):
