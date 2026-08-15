@@ -1,0 +1,137 @@
+version: 1
+description: >
+  Gold-SQL eval set for the Autonomous Analyst agent. Each entry's `sql` is a
+  verified reference query against the real DuckDB schema (orders, order_items,
+  sales_targets) -- not necessarily the only correct query, but a correct one.
+
+easy:
+  - q: What is the total revenue across all orders?
+    sql: |
+      SELECT SUM(amount) AS revenue
+      FROM order_items
+
+  - q: How many distinct orders are there?
+    sql: |
+      SELECT COUNT(DISTINCT order_id) AS order_count
+      FROM orders
+
+  - q: What is the total profit?
+    sql: |
+      SELECT SUM(profit) AS total_profit
+      FROM order_items
+
+  - q: List all distinct product categories.
+    sql: |
+      SELECT DISTINCT category
+      FROM order_items
+      ORDER BY category
+
+medium:
+  - q: Total revenue by state, highest first.
+    sql: |
+      SELECT o.state, SUM(oi.amount) AS revenue
+      FROM orders o
+      JOIN order_items oi ON o.order_id = oi.order_id
+      GROUP BY o.state
+      ORDER BY revenue DESC
+
+  - q: Which sub-category has the highest total profit?
+    sql: |
+      SELECT sub_category, SUM(profit) AS total_profit
+      FROM order_items
+      GROUP BY sub_category
+      ORDER BY total_profit DESC
+      LIMIT 1
+
+  - q: What is the average order value?
+    sql: |
+      SELECT SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value
+      FROM orders o
+      JOIN order_items oi ON o.order_id = oi.order_id
+
+  - q: Units sold per category.
+    sql: |
+      SELECT category, SUM(quantity) AS units_sold
+      FROM order_items
+      GROUP BY category
+      ORDER BY units_sold DESC
+
+  - q: Which city generated the most revenue?
+    sql: |
+      SELECT o.city, SUM(oi.amount) AS revenue
+      FROM orders o
+      JOIN order_items oi ON o.order_id = oi.order_id
+      GROUP BY o.city
+      ORDER BY revenue DESC
+      LIMIT 1
+
+  - q: Profit margin per category.
+    sql: |
+      SELECT category, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin
+      FROM order_items
+      GROUP BY category
+      ORDER BY profit_margin DESC
+
+hard:
+  - q: Which sub-categories are loss-making (negative total profit)?
+    sql: |
+      SELECT sub_category, SUM(profit) AS total_profit
+      FROM order_items
+      GROUP BY sub_category
+      HAVING SUM(profit) < 0
+      ORDER BY total_profit ASC
+
+  - q: What is the monthly revenue trend over time?
+    sql: |
+      SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue
+      FROM orders o
+      JOIN order_items oi ON o.order_id = oi.order_id
+      GROUP BY month
+      ORDER BY month
+
+  - q: For each category, which state has the highest revenue? (top state per category)
+    sql: |
+      WITH cat_state AS (
+        SELECT oi.category, o.state, SUM(oi.amount) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY oi.category, o.state
+      ),
+      ranked AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY revenue DESC) AS rn
+        FROM cat_state
+      )
+      SELECT category, state, revenue
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY category
+
+  - q: Which category-months missed their sales target (actual revenue < target)?
+    sql: |
+      WITH monthly_actuals AS (
+        SELECT oi.category, strftime(o.order_date, '%Y-%m') AS month_key, SUM(oi.amount) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY oi.category, month_key
+      )
+      SELECT ma.category, ma.month_key, ma.revenue AS actual_revenue, st.target
+      FROM monthly_actuals ma
+      JOIN sales_targets st ON ma.category = st.category AND ma.month_key = st.month_key
+      WHERE ma.revenue < st.target
+      ORDER BY ma.category, ma.month_key
+
+  - q: What was the month-over-month revenue growth percentage?
+    sql: |
+      WITH monthly AS (
+        SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY month
+      )
+      SELECT
+        month,
+        revenue,
+        (revenue - LAG(revenue) OVER (ORDER BY month))
+          / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS mom_growth_pct
+      FROM monthly
+      ORDER BY month
