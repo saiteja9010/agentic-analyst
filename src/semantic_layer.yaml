@@ -1,0 +1,52 @@
+version: 1
+dataset: Indian e-commerce (orders, order_items, sales_targets)
+currency: INR
+tables:
+  orders:
+    description: One row per customer order (header).
+    columns:
+      order_id: {type: string, description: Unique order identifier, key: primary}
+      order_date: {type: timestamp, description: Date the order was placed}
+      customer_name: {type: string, description: Customer name, pii: true, exclude_from_output: true}
+      state: {type: string, description: Indian state}
+      city: {type: string, description: City}
+  order_items:
+    description: One row per product line in an order. Join to orders on order_id.
+    columns:
+      order_id: {type: string, description: FK to orders.order_id, key: foreign}
+      amount: {type: number, description: Line revenue in INR (sales)}
+      profit: {type: number, description: Line profit in INR; CAN BE NEGATIVE (loss)}
+      quantity: {type: integer, description: Units sold}
+      category: {type: string, description: Product category}
+      sub_category: {type: string, description: Product sub-category}
+  sales_targets:
+    description: Monthly sales target per category. Join to actuals by (category, month).
+    columns:
+      month_key: {type: string, description: 'Month as VARCHAR in "YYYY-MM" format (NOT a DATE column). To join against orders, compute strftime(orders.order_date, ''%Y-%m'') and compare as text.'}
+      category: {type: string, description: Product category (matches order_items.category)}
+      target: {type: number, description: Monthly sales target in INR}
+relationships:
+  - orders.order_id is 1-to-many with order_items.order_id
+  - "actuals_vs_target: aggregate order_items.amount by category and by strftime(orders.order_date, '%Y-%m'), then join sales_targets on category AND month_key (both VARCHAR 'YYYY-MM')"
+metrics:
+  revenue: SUM(order_items.amount)
+  total_profit: SUM(order_items.profit)
+  profit_margin: SUM(order_items.profit) / NULLIF(SUM(order_items.amount), 0)
+  order_count: COUNT(DISTINCT orders.order_id)
+  units_sold: SUM(order_items.quantity)
+  avg_order_value: SUM(order_items.amount) / NULLIF(COUNT(DISTINCT orders.order_id), 0)
+  target_attainment: revenue / NULLIF(target, 0)   # per category-month
+synonyms:
+  sales / turnover / amount: revenue
+  region: state
+  product type / product category: category
+  goal: target
+dimensions:
+  time: [order_date (day/month/year via date_trunc/strftime), month_key (VARCHAR 'YYYY-MM')]
+  geography: [state, city]
+  product: [category, sub_category]
+notes:
+  - Currency is INR.
+  - profit can be negative; surface loss-making categories/sub-categories where relevant.
+  - month_key in sales_targets is VARCHAR 'YYYY-MM', not a DATE column — join using strftime(order_date, '%Y-%m') = month_key.
+  - customer_name is PII and is stripped from tool results automatically; never rely on it in output.
