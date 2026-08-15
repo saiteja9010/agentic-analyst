@@ -221,12 +221,15 @@ def answer_question(
     question: str,
     history: list[dict] | None = None,
     client: OpenAI | None = None,
+    temperature: float | None = None,
 ) -> dict:
     """Answer one natural-language question over the warehouse.
 
     Returns {"answer_text": str, "sql": str | None, "rows": list[dict], "trace": list[str]}.
     `history` is a flat list of prior {"role": "user"|"assistant", "content": str} turns; pass
     None (default) for a stateless single-shot call, e.g. from an eval harness.
+    `temperature` is passed straight to the LLM call (e.g. 0 for deterministic eval runs);
+    None uses the provider default.
     """
     history = history or []
 
@@ -248,6 +251,10 @@ def answer_question(
     has_called_tool = False
     nudge_used = False
 
+    completion_kwargs: dict = {"extra_body": {"options": {"num_ctx": NUM_CTX}}}
+    if temperature is not None:
+        completion_kwargs["temperature"] = temperature
+
     try:
         for _ in range(MAX_TOOL_ITERATIONS):
             response = client.chat.completions.create(
@@ -255,7 +262,7 @@ def answer_question(
                 messages=messages,
                 tools=[RUN_SQL_TOOL_SCHEMA],
                 tool_choice="auto",
-                extra_body={"options": {"num_ctx": NUM_CTX}},
+                **completion_kwargs,
             )
             msg = response.choices[0].message
 
