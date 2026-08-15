@@ -277,9 +277,106 @@ SQL: SELECT o.city, SUM(oi.profit) / NULLIF(SUM(oi.amount), 0) AS profit_margin
 {semantic_layer}
 === END SEMANTIC LAYER ==="""
 
+SYNTHESIS_SYSTEM_PROMPT = """You write the final natural-language answer for the Autonomous \
+Analyst. You are given the user's question and the exact result table returned by the SQL \
+query that answered it. Summarize ONLY what is in that table -- never use outside knowledge, \
+never guess, and never pull numbers or claims from conversation history. Currency values are \
+in INR.
+
+Rules for what to state, by shape of the table:
+- Trend over time (a period/date column plus a metric, multiple rows ordered by period): the
+  JSON below includes "first_row" and "last_row" fields -- these ARE the first and last periods
+  in the query's own row order. Use them verbatim (do not re-derive "first"/"last" by scanning
+  "rows" yourself, and do not assume calendar order). State their period and value BY NAME AND
+  NUMBER, and give the overall direction and magnitude of the change (e.g. "revenue rose from
+  INR 12,400 in 2018-04 to INR 18,900 in 2019-03, up about 52%").
+- Ranking / top-N: name the top item(s) by their label and state their value(s).
+- Single metric (one row, one number): state the number plainly, with INR units if it is a
+  currency amount.
+- Anything else: pick out the concrete rows/values that matter and state them by name and number.
+
+Hard requirements:
+- Every claim must be backed by a concrete number or name taken verbatim from the table. NEVER
+  compute or invent a number that is not literally one of the table's cell values -- e.g. if you
+  mention a row's growth-percentage cell, do not also invent a "from X to Y" revenue pair for
+  that row unless X and Y are themselves literal cell values you can point to. The only
+  before/after comparison you may build is the trend first_row-vs-last_row comparison described
+  above, because those two values are handed to you explicitly.
+- Quote period/date/category labels and numbers EXACTLY as they appear in the table, character
+  for character. If a period label in the table is "2018-04", every mention of that period in
+  your answer must be written "2018-04" -- CORRECT: "rose from INR 32,726 in 2018-04 to INR
+  58,937 in 2019-03". WRONG: "rose from INR 32,726 in April 2018 to INR 58,937 in March 2019"
+  (reformatted the label -- never do this, even mid-sentence or in a summary clause).
+- Never write vague filler ("fluctuating", "varies", "some", "several", "various", "a mix of")
+  unless the very next clause gives the concrete numbers those words refer to.
+- Do not repeat the whole table row by row -- summarize it, but every sentence must be grounded
+  in an actual value from the table.
+- If the table is empty, say so plainly instead of inventing numbers.
+- Be concise: a few sentences is enough."""
+
 
 def build_client() -> OpenAI:
     return OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
+
+
+def _rows_for_synthesis(df: pd.DataFrame, max_rows: int = 40) -> tuple[list[dict], bool]:
+    """Rows to hand to the final-answer synthesis call.
+
+    Trends need the first and last period visible even when the table is large, so a
+    truncated table keeps both ends (head + tail) rather than just the head.
+    """
+    if len(df) <= max_rows:
+        return df.to_dict(orient="records"), False
+    half = max_rows // 2
+    combined = pd.concat([df.head(half), df.tail(max_rows - half)])
+    return combined.to_dict(orient="records"), True
+
+
+def synthesize_final_answer(
+    question: str,
+    df: pd.DataFrame,
+    client: OpenAI,
+    temperature: float | None = None,
+    seed: int | None = None,
+) -> str:
+    """Generate the final natural-language answer strictly from the returned table.
+
+    Kept as a separate, single-purpose LLM call (no tools, no conversation history) so the
+    model can't fall back on vague phrasing from an earlier drafted response -- it only ever
+    sees the question and the actual result rows.
+    """
+    rows_payload, truncated = _rows_for_synthesis(df) if not df.empty else ([], False)
+    first_row = df.iloc[0].to_dict() if not df.empty else None
+    last_row = df.iloc[-1].to_dict() if not df.empty else None
+    table_json = json.dumps(
+        {
+            "row_count": len(df),
+            "first_row": first_row,
+            "last_row": last_row,
+            "rows": rows_payload,
+            "truncated": truncated,
+        },
+        default=str,
+    )
+    messages = [
+        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"Question: {question}\n\n"
+                f"Result table (JSON -- the ONLY source of truth for your answer):\n{table_json}"
+            ),
+        },
+    ]
+
+    kwargs: dict = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
+
+    response = client.chat.completions.create(model=LLM_MODEL, messages=messages, **kwargs)
+    return response.choices[0].message.content or "(no answer produced)"
 
 
 def _refusal(reason: str) -> dict:
@@ -372,8 +469,15 @@ def answer_question(
                             }
                         )
                         continue
+                    if has_called_tool:
+                        answer_text = synthesize_final_answer(
+                            question, last_df, client, temperature=temperature, seed=seed
+                        )
+                        trace.append("synthesis: generated final answer from returned table")
+                    else:
+                        answer_text = msg.content or "(no answer produced)"
                     return {
-                        "answer_text": msg.content or "(no answer produced)",
+                        "answer_text": answer_text,
                         "sql": last_sql,
                         "rows": last_df.to_dict(orient="records"),
                         "trace": trace,
