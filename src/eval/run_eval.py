@@ -1,7 +1,7 @@
 """Execution-accuracy eval harness for the Autonomous Analyst agent.
 
 For every question in questions.yaml: run the agent single-shot (no conversation
-history, temperature=0), run the gold SQL directly against the warehouse, and
+history, temperature=0, seed=0), run the gold SQL directly against the warehouse, and
 compare the two result sets. Also does a light heuristic check for "SQL passed
 but the natural-language answer doesn't actually mention the key number/name" --
 a synthesis problem distinct from a SQL correctness problem.
@@ -113,7 +113,7 @@ def run() -> dict:
         gold_df = gold_con.execute(gold_sql).fetchdf()
         gold_set = df_to_row_set(gold_df)
 
-        agent_result = answer_question(q, history=None, client=client, temperature=0)
+        agent_result = answer_question(q, history=None, client=client, temperature=0, seed=0)
         agent_df = pd.DataFrame(agent_result["rows"])
         agent_set = df_to_row_set(agent_df)
 

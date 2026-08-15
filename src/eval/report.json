@@ -1,8 +1,8 @@
 {
   "overall": {
-    "passed": 13,
+    "passed": 14,
     "total": 15,
-    "pct": 86.7
+    "pct": 93.3
   },
   "by_difficulty": {
     "easy": {
@@ -11,9 +11,9 @@
       "pct": 100.0
     },
     "medium": {
-      "passed": 5,
+      "passed": 6,
       "total": 6,
-      "pct": 83.3
+      "pct": 100.0
     },
     "hard": {
       "passed": 4,
@@ -21,7 +21,7 @@
       "pct": 80.0
     }
   },
-  "synthesis_suspect_count": 1,
+  "synthesis_suspect_count": 0,
   "results": [
     {
       "difficulty": "easy",
@@ -71,13 +71,13 @@
       "agent_row_count": 1,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The total profit is **23,955 INR**.",
+      "answer_text": "The total profit is 23,955 INR.",
       "key_value": 23955.0,
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT SUM(profit) AS total_profit FROM order_items;')"
+        "tool_call: run_sql('SELECT SUM(profit) AS total_profit FROM order_items')"
       ]
     },
     {
@@ -115,7 +115,7 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT state, SUM(amount) AS total_revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY state ORDER BY total_revenue DESC;')"
+        "tool_call: run_sql('SELECT state, SUM(amount) AS total_revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY state ORDER BY total_revenue DESC')"
       ]
     },
     {
@@ -172,7 +172,7 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category ORDER BY units_sold DESC;')"
+        "tool_call: run_sql('SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category ORDER BY units_sold DESC')"
       ]
     },
     {
@@ -198,51 +198,19 @@
       "difficulty": "medium",
       "question": "Profit margin per category.",
       "gold_sql": "SELECT category, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin\nFROM order_items\nGROUP BY category\nORDER BY profit_margin DESC",
-      "agent_sql": "SELECT category, SUM(profit) AS total_profit, SUM(amount) AS total_revenue, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC\nLIMIT 1000",
-      "execution_pass": false,
+      "agent_sql": "SELECT category, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC\nLIMIT 1000",
+      "execution_pass": true,
       "gold_row_count": 3,
       "agent_row_count": 3,
-      "gold_only_rows": [
-        [
-          0.02,
-          "Furniture"
-        ],
-        [
-          0.06,
-          "Electronics"
-        ],
-        [
-          0.08,
-          "Clothing"
-        ]
-      ],
-      "agent_only_rows": [
-        [
-          0.02,
-          127181.0,
-          2298.0,
-          "Furniture"
-        ],
-        [
-          0.06,
-          10494.0,
-          165267.0,
-          "Electronics"
-        ],
-        [
-          0.08,
-          11163.0,
-          139054.0,
-          "Clothing"
-        ]
-      ],
-      "answer_text": "The top 3 categories by profit margin are:\n\n1. Clothing: 8.03%\n2. Electronics: 6.35%\n3. Furniture: 1.81%",
+      "gold_only_rows": [],
+      "agent_only_rows": [],
+      "answer_text": "The profit margin per category is as follows:\n\n| Category   | Profit Margin |\n|------------|---------------|\n| Clothing   | 8.03%         |\n| Electronics| 6.35%         |\n| Furniture  | 1.81%         |",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT category, SUM(profit) AS total_profit, SUM(amount) AS total_revenue, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC;')"
+        "tool_call: run_sql('SELECT category, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC;')"
       ]
     },
     {
@@ -255,32 +223,32 @@
       "agent_row_count": 2,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The sub-categories with negative total profit (loss-making) are:\n\n1. Tables - Total Profit: -4,011 INR\n2. Electronic Games - Total Profit: -1,236 INR",
+      "answer_text": "The sub-categories with negative total profit (loss-making) are:\n\n1. Tables - INR 4,011 loss\n2. Electronic Games - INR 1,236 loss",
       "key_value": "Tables",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT sub_category, SUM(profit) AS total_profit FROM order_items GROUP BY sub_category HAVING SUM(profit) < 0 ORDER BY total_profit ASC;')"
+        "tool_call: run_sql('SELECT sub_category, SUM(profit) AS total_profit FROM order_items GROUP BY sub_category HAVING SUM(profit) < 0 ORDER BY total_profit ASC')"
       ]
     },
     {
       "difficulty": "hard",
       "question": "What is the monthly revenue trend over time?",
       "gold_sql": "SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue\nFROM orders o\nJOIN order_items oi ON o.order_id = oi.order_id\nGROUP BY month\nORDER BY month",
-      "agent_sql": "SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month\nLIMIT 1000",
+      "agent_sql": "SELECT strftime(order_date, '%Y-%m') AS month, SUM(amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 12,
       "agent_row_count": 12,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The monthly revenue trend over time shows a fluctuating pattern, with peaks in revenue during certain months.",
+      "answer_text": "The monthly revenue trend over time shows the following data:\n\n| Month       | Revenue (INR) |\n|-------------|---------------|\n| 2018-04     | 32,726        |\n| 2018-05     | 28,545        |\n| 2018-06     | 23,658        |\n| 2018-07     | 12,966        |\n| 2018-08     | 30,899        |\n| 2018-09     | 26,628        |\n| 2018-10     | 31,615        |\n| 2018-11     | 48,086        |\n| 2018-12     | 37,579        |\n| 2019-01     | 61,439        |\n| 2019-02     | 38,424        |\n| 2019-03     | 58,937        |",
       "key_value": "2018-04",
-      "key_value_mentioned": false,
-      "synthesis_suspect": true,
+      "key_value_mentioned": true,
+      "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month;\")"
+        "tool_call: run_sql(\"SELECT strftime(order_date, '%Y-%m') AS month, SUM(amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month;\")"
       ]
     },
     {
@@ -306,7 +274,7 @@
       "difficulty": "hard",
       "question": "Which category-months missed their sales target (actual revenue < target)?",
       "gold_sql": "WITH monthly_actuals AS (\n  SELECT oi.category, strftime(o.order_date, '%Y-%m') AS month_key, SUM(oi.amount) AS revenue\n  FROM orders o\n  JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY oi.category, month_key\n)\nSELECT ma.category, ma.month_key, ma.revenue AS actual_revenue, st.target\nFROM monthly_actuals ma\nJOIN sales_targets st ON ma.category = st.category AND ma.month_key = st.month_key\nWHERE ma.revenue < st.target\nORDER BY ma.category, ma.month_key",
-      "agent_sql": "WITH actuals_vs_target AS (\n  SELECT \n    strftime(o.order_date, '%Y-%m') AS month_key,\n    oi.category,\n    SUM(oi.amount) AS revenue\n  FROM \n    orders o \n  JOIN \n    order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    month_key, oi.category\n)\nSELECT \n  actuals_vs_target.month_key,\n  actuals_vs_target.category,\n  revenue,\n  st.target,\n  revenue < st.target AS missed_target\nFROM \n  actuals_vs_target\nJOIN \n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\nWHERE \n  revenue < st.target\nLIMIT 1000",
+      "agent_sql": "WITH actual_vs_target AS (\n  SELECT \n    strftime(o.order_date, '%Y-%m') AS month_key,\n    oi.category,\n    SUM(oi.amount) AS actual_revenue\n  FROM \n    orders o \n  JOIN \n    order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    month_key, category\n)\nSELECT \n  actual_vs_target.month_key,\n  actual_vs_target.category,\n  actual_revenue,\n  st.target,\n  actual_revenue < st.target AS missed_target\nFROM \n  actual_vs_target\nJOIN \n  sales_targets st ON actual_vs_target.month_key = st.month_key AND actual_vs_target.category = st.category\nWHERE \n  actual_revenue < st.target\nLIMIT 1000",
       "execution_pass": false,
       "gold_row_count": 20,
       "agent_row_count": 20,
@@ -444,38 +412,38 @@
           "Clothing"
         ]
       ],
-      "answer_text": "The category-months that missed their sales target (actual revenue < target) are:\n\n- 2018-07: Electronics\n- 2018-09: Clothing\n- 2018-06: Furniture\n- 2019-02: Clothing\n- 2019-02: Electronics\n- 2018-07: Furniture\n- 2018-10: Furniture\n- 2018-06: Clothing\n- 2018-05: Furniture\n- 2018-08: Furniture\n- 2018-08: Clothing\n- 2018-05: Clothing\n- 2019-01: Clothing\n- 2018-04: Furniture\n- 2018-12: Furniture\n- 2018-12: Clothing\n- 2018-09: Furniture\n- 2018-07: Clothing\n- 2018-09: Electronics\n- 2018-10: Clothing",
+      "answer_text": "The category-months that missed their sales target (actual revenue < target) are:\n\n- 2018-07: Furniture\n- 2018-10: Furniture\n- 2018-06: Furniture\n- 2019-02: Clothing\n- 2018-12: Clothing\n- 2018-05: Clothing\n- 2018-06: Clothing\n- 2019-01: Clothing\n- 2018-08: Furniture\n- 2018-07: Electronics\n- 2018-09: Clothing\n- 2019-02: Electronics\n- 2018-07: Clothing\n- 2018-09: Electronics\n- 2018-10: Clothing\n- 2018-04: Furniture\n- 2018-12: Furniture\n- 2018-05: Furniture\n- 2018-09: Furniture\n- 2018-08: Clothing",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  month_key,\\n  category,\\n  revenue,\\n  target,\\n  revenue < target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < target;\")",
-        "sql_error (1/3): Binder Error: Ambiguous reference to column name \"month_key\" (use: \"actuals_vs_target.month_key\" or \"st.month_key\")\n\nLINE 14:   month_key,\n           ^",
+        "tool_call: run_sql(\"WITH actual_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS actual_revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, category\\n)\\nSELECT \\n  month_key,\\n  category,\\n  actual_revenue,\\n  target,\\n  actual_revenue < target AS missed_target\\nFROM \\n  actual_vs_target\\nJOIN \\n  sales_targets st ON actual_vs_target.month_key = st.month_key AND actual_vs_target.category = st.category\\nWHERE \\n  actual_revenue < target;\")",
+        "sql_error (1/3): Binder Error: Ambiguous reference to column name \"month_key\" (use: \"actual_vs_target.month_key\" or \"st.month_key\")\n\nLINE 14:   month_key,\n           ^",
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  actuals_vs_target.month_key,\\n  category,\\n  revenue,\\n  st.target,\\n  revenue < st.target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < st.target;\")",
-        "sql_error (2/3): Binder Error: Ambiguous reference to column name \"category\" (use: \"actuals_vs_target.category\" or \"st.category\")\n\nLINE 15:   category,\n           ^",
+        "tool_call: run_sql(\"WITH actual_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS actual_revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, category\\n)\\nSELECT \\n  actual_vs_target.month_key,\\n  category,\\n  actual_revenue,\\n  st.target,\\n  actual_revenue < st.target AS missed_target\\nFROM \\n  actual_vs_target\\nJOIN \\n  sales_targets st ON actual_vs_target.month_key = st.month_key AND actual_vs_target.category = st.category\\nWHERE \\n  actual_revenue < st.target;\")",
+        "sql_error (2/3): Binder Error: Ambiguous reference to column name \"category\" (use: \"actual_vs_target.category\" or \"st.category\")\n\nLINE 15:   category,\n           ^",
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  actuals_vs_target.month_key,\\n  actuals_vs_target.category,\\n  revenue,\\n  st.target,\\n  revenue < st.target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < st.target;\")"
+        "tool_call: run_sql(\"WITH actual_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS actual_revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, category\\n)\\nSELECT \\n  actual_vs_target.month_key,\\n  actual_vs_target.category,\\n  actual_revenue,\\n  st.target,\\n  actual_revenue < st.target AS missed_target\\nFROM \\n  actual_vs_target\\nJOIN \\n  sales_targets st ON actual_vs_target.month_key = st.month_key AND actual_vs_target.category = st.category\\nWHERE \\n  actual_revenue < st.target;\")"
       ]
     },
     {
       "difficulty": "hard",
       "question": "What was the month-over-month revenue growth percentage?",
       "gold_sql": "WITH monthly AS (\n  SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue\n  FROM orders o\n  JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY month\n)\nSELECT\n  month,\n  revenue,\n  (revenue - LAG(revenue) OVER (ORDER BY month))\n    / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS mom_growth_pct\nFROM monthly\nORDER BY month",
-      "agent_sql": "WITH monthly_revenue AS (\n  SELECT \n    strftime(order_date, '%Y-%m') AS month,\n    SUM(amount) AS revenue\n  FROM \n    orders o \n    JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    month\n  ORDER BY \n    month\n)\nSELECT \n  month,\n  revenue,\n  (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth\nFROM \n  monthly_revenue\nLIMIT 1000",
+      "agent_sql": "WITH monthly_revenue AS (\n    SELECT \n        strftime(order_date, '%Y-%m') AS month,\n        SUM(amount) AS revenue\n    FROM \n        orders o \n    JOIN \n        order_items oi ON o.order_id = oi.order_id\n    GROUP BY \n        month\n    ORDER BY \n        month\n)\nSELECT \n    month,\n    revenue,\n    (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth_percentage\nFROM \n    monthly_revenue\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 12,
       "agent_row_count": 12,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The month-over-month revenue growth percentage for each month from 2018-04 to 2019-03 is as follows:\n\n| Month       | Revenue (INR) | Month-over-Month Growth (%) |\n|-------------|---------------|-----------------------------|\n| 2018-04     | 32,726.0      | NaN                         |\n| 2018-05     | 28,545.0      | -12.78%                     |\n| 2018-06     | 23,658.0      | -17.12%                     |\n| 2018-07     | 12,966.0      | -45.19%                     |\n| 2018-08     | 30,899.0      | 138.31%                     |\n| 2018-09     | 26,628.0      | -13.82%                     |\n| 2018-10     | 31,615.0      | 18.73%                      |\n| 2018-11     | 48,086.0      | 52.10%                      |\n| 2018-12     | 37,579.0      | -21.85%                     |\n| 2019-01     | 61,439.0      | 63.49%                      |\n| 2019-02     | 38,424.0      | -37.46%                     |\n| 2019-03     | 58,937.0      | 53.39%                      |",
+      "answer_text": "The month-over-month revenue growth percentage for each month from 2018-04 to 2019-03 is as follows:\n\n| Month       | Revenue (INR) | Month-over-Month Growth Percentage |\n|-------------|---------------|------------------------------------|\n| 2018-04     | 32,726.0      | NaN                                |\n| 2018-05     | 28,545.0      | -12.78%                            |\n| 2018-06     | 23,658.0      | -17.12%                            |\n| 2018-07     | 12,966.0      | -45.19%                            |\n| 2018-08     | 30,899.0      | 138.31%                            |\n| 2018-09     | 26,628.0      | -13.82%                            |\n| 2018-10     | 31,615.0      | 18.73%                             |\n| 2018-11     | 48,086.0      | 52.10%                             |\n| 2018-12     | 37,579.0      | -21.85%                            |\n| 2019-01     | 61,439.0      | 63.49%                             |\n| 2019-02     | 38,424.0      | -37.46%                            |\n| 2019-03     | 58,937.0      | 53.39%                             |",
       "key_value": "2018-04",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH monthly_revenue AS (\\n  SELECT \\n    strftime(order_date, '%Y-%m') AS month,\\n    SUM(amount) AS revenue\\n  FROM \\n    orders o \\n    JOIN order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month\\n  ORDER BY \\n    month\\n)\\nSELECT \\n  month,\\n  revenue,\\n  (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth\\nFROM \\n  monthly_revenue;\")"
+        "tool_call: run_sql(\"WITH monthly_revenue AS (\\n    SELECT \\n        strftime(order_date, '%Y-%m') AS month,\\n        SUM(amount) AS revenue\\n    FROM \\n        orders o \\n    JOIN \\n        order_items oi ON o.order_id = oi.order_id\\n    GROUP BY \\n        month\\n    ORDER BY \\n        month\\n)\\nSELECT \\n    month,\\n    revenue,\\n    (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth_percentage\\nFROM \\n    monthly_revenue;\")"
       ]
     }
   ]
