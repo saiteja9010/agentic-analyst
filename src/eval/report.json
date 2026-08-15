@@ -1,8 +1,8 @@
 {
   "overall": {
-    "passed": 10,
+    "passed": 13,
     "total": 15,
-    "pct": 66.7
+    "pct": 86.7
   },
   "by_difficulty": {
     "easy": {
@@ -16,9 +16,9 @@
       "pct": 83.3
     },
     "hard": {
-      "passed": 1,
+      "passed": 4,
       "total": 5,
-      "pct": 20.0
+      "pct": 80.0
     }
   },
   "synthesis_suspect_count": 1,
@@ -27,7 +27,7 @@
       "difficulty": "easy",
       "question": "What is the total revenue across all orders?",
       "gold_sql": "SELECT SUM(amount) AS revenue\nFROM order_items",
-      "agent_sql": "SELECT SUM(order_items.amount) AS total_revenue FROM order_items\nLIMIT 1000",
+      "agent_sql": "SELECT SUM(amount) AS total_revenue FROM order_items\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 1,
       "agent_row_count": 1,
@@ -39,7 +39,7 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT SUM(order_items.amount) AS total_revenue FROM order_items;')"
+        "tool_call: run_sql('SELECT SUM(amount) AS total_revenue FROM order_items')"
       ]
     },
     {
@@ -58,7 +58,7 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT COUNT(DISTINCT order_id) AS order_count FROM orders;')"
+        "tool_call: run_sql('SELECT COUNT(DISTINCT order_id) AS order_count FROM orders')"
       ]
     },
     {
@@ -90,7 +90,7 @@
       "agent_row_count": 3,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The distinct product categories are: Electronics, Furniture, and Clothing.",
+      "answer_text": "The distinct product categories are:\n\n1. Electronics\n2. Furniture\n3. Clothing",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
@@ -103,7 +103,7 @@
       "difficulty": "medium",
       "question": "Total revenue by state, highest first.",
       "gold_sql": "SELECT o.state, SUM(oi.amount) AS revenue\nFROM orders o\nJOIN order_items oi ON o.order_id = oi.order_id\nGROUP BY o.state\nORDER BY revenue DESC",
-      "agent_sql": "SELECT state, SUM(amount) AS total_revenue FROM orders JOIN order_items ON orders.order_id = order_items.order_id GROUP BY state ORDER BY total_revenue DESC\nLIMIT 1000",
+      "agent_sql": "SELECT state, SUM(amount) AS total_revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY state ORDER BY total_revenue DESC\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 19,
       "agent_row_count": 19,
@@ -115,7 +115,7 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT state, SUM(amount) AS total_revenue FROM orders JOIN order_items ON orders.order_id = order_items.order_id GROUP BY state ORDER BY total_revenue DESC;')"
+        "tool_call: run_sql('SELECT state, SUM(amount) AS total_revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY state ORDER BY total_revenue DESC;')"
       ]
     },
     {
@@ -141,53 +141,45 @@
       "difficulty": "medium",
       "question": "What is the average order value?",
       "gold_sql": "SELECT SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value\nFROM orders o\nJOIN order_items oi ON o.order_id = oi.order_id",
-      "agent_sql": "SELECT AVG(order_items.amount) AS avg_order_value FROM order_items\nLIMIT 1000",
-      "execution_pass": false,
+      "agent_sql": "SELECT SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value FROM orders o JOIN order_items oi ON o.order_id = oi.order_id\nLIMIT 1000",
+      "execution_pass": true,
       "gold_row_count": 1,
       "agent_row_count": 1,
-      "gold_only_rows": [
-        [
-          863.0
-        ]
-      ],
-      "agent_only_rows": [
-        [
-          287.67
-        ]
-      ],
-      "answer_text": "The average order value is \u20b9287.67.",
+      "gold_only_rows": [],
+      "agent_only_rows": [],
+      "answer_text": "The average order value is \u20b9863.00.",
       "key_value": 863.004,
-      "key_value_mentioned": false,
+      "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT AVG(order_items.amount) AS avg_order_value FROM order_items;')"
+        "tool_call: run_sql('SELECT SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value FROM orders o JOIN order_items oi ON o.order_id = oi.order_id')"
       ]
     },
     {
       "difficulty": "medium",
       "question": "Units sold per category.",
       "gold_sql": "SELECT category, SUM(quantity) AS units_sold\nFROM order_items\nGROUP BY category\nORDER BY units_sold DESC",
-      "agent_sql": "SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category\nLIMIT 1000",
+      "agent_sql": "SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category ORDER BY units_sold DESC\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 3,
       "agent_row_count": 3,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "Units sold per category:\n\n- Electronics: 1,154 units\n- Clothing: 3,516 units\n- Furniture: 945 units",
+      "answer_text": "The top categories by units sold are:\n\n1. Clothing: 3,516 units\n2. Electronics: 1,154 units\n3. Furniture: 945 units",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category;')"
+        "tool_call: run_sql('SELECT category, SUM(quantity) AS units_sold FROM order_items GROUP BY category ORDER BY units_sold DESC;')"
       ]
     },
     {
       "difficulty": "medium",
       "question": "Which city generated the most revenue?",
       "gold_sql": "SELECT o.city, SUM(oi.amount) AS revenue\nFROM orders o\nJOIN order_items oi ON o.order_id = oi.order_id\nGROUP BY o.city\nORDER BY revenue DESC\nLIMIT 1",
-      "agent_sql": "SELECT city, SUM(amount) AS total_revenue\nFROM orders\nJOIN order_items ON orders.order_id = order_items.order_id\nGROUP BY city\nORDER BY total_revenue DESC\nLIMIT 1",
+      "agent_sql": "SELECT city, SUM(amount) AS total_revenue\nFROM orders o JOIN order_items oi ON o.order_id = oi.order_id\nGROUP BY city\nORDER BY total_revenue DESC\nLIMIT 1",
       "execution_pass": true,
       "gold_row_count": 1,
       "agent_row_count": 1,
@@ -199,213 +191,125 @@
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT city, SUM(amount) AS total_revenue\\nFROM orders\\nJOIN order_items ON orders.order_id = order_items.order_id\\nGROUP BY city\\nORDER BY total_revenue DESC\\nLIMIT 1;')"
+        "tool_call: run_sql('SELECT city, SUM(amount) AS total_revenue\\nFROM orders o JOIN order_items oi ON o.order_id = oi.order_id\\nGROUP BY city\\nORDER BY total_revenue DESC\\nLIMIT 1;')"
       ]
     },
     {
       "difficulty": "medium",
       "question": "Profit margin per category.",
       "gold_sql": "SELECT category, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin\nFROM order_items\nGROUP BY category\nORDER BY profit_margin DESC",
-      "agent_sql": "SELECT \n    category, \n    total_profit / NULLIF(total_revenue, 0) AS profit_margin\nFROM \n    (SELECT \n        category, \n        SUM(profit) AS total_profit, \n        SUM(amount) AS total_revenue\n     FROM \n        order_items\n     GROUP BY \n        category) AS subquery\nLIMIT 1000",
-      "execution_pass": true,
+      "agent_sql": "SELECT category, SUM(profit) AS total_profit, SUM(amount) AS total_revenue, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC\nLIMIT 1000",
+      "execution_pass": false,
       "gold_row_count": 3,
       "agent_row_count": 3,
-      "gold_only_rows": [],
-      "agent_only_rows": [],
-      "answer_text": "The profit margin per category is as follows:\n\n- Electronics: 6.35%\n- Clothing: 8.03%\n- Furniture: 1.81%",
+      "gold_only_rows": [
+        [
+          0.02,
+          "Furniture"
+        ],
+        [
+          0.06,
+          "Electronics"
+        ],
+        [
+          0.08,
+          "Clothing"
+        ]
+      ],
+      "agent_only_rows": [
+        [
+          0.02,
+          127181.0,
+          2298.0,
+          "Furniture"
+        ],
+        [
+          0.06,
+          10494.0,
+          165267.0,
+          "Electronics"
+        ],
+        [
+          0.08,
+          11163.0,
+          139054.0,
+          "Clothing"
+        ]
+      ],
+      "answer_text": "The top 3 categories by profit margin are:\n\n1. Clothing: 8.03%\n2. Electronics: 6.35%\n3. Furniture: 1.81%",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT \\n    category, \\n    profit_margin\\nFROM \\n    (SELECT \\n        category, \\n        SUM(profit) AS total_profit, \\n        SUM(amount) AS total_revenue\\n     FROM \\n        order_items\\n     GROUP BY \\n        category) AS subquery;')",
-        "sql_error (1/3): Binder Error: Referenced column \"profit_margin\" not found in FROM clause!\nCandidate bindings: \"total_revenue\", \"total_profit\"\n\nLINE 3:     profit_margin\n            ^",
-        "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT \\n    category, \\n    total_profit / NULLIF(total_revenue, 0) AS profit_margin\\nFROM \\n    (SELECT \\n        category, \\n        SUM(profit) AS total_profit, \\n        SUM(amount) AS total_revenue\\n     FROM \\n        order_items\\n     GROUP BY \\n        category) AS subquery;')"
+        "tool_call: run_sql('SELECT category, SUM(profit) AS total_profit, SUM(amount) AS total_revenue, SUM(profit) / NULLIF(SUM(amount), 0) AS profit_margin FROM order_items GROUP BY category ORDER BY profit_margin DESC;')"
       ]
     },
     {
       "difficulty": "hard",
       "question": "Which sub-categories are loss-making (negative total profit)?",
       "gold_sql": "SELECT sub_category, SUM(profit) AS total_profit\nFROM order_items\nGROUP BY sub_category\nHAVING SUM(profit) < 0\nORDER BY total_profit ASC",
-      "agent_sql": "SELECT sub_category FROM order_items WHERE profit < 0 GROUP BY sub_category\nLIMIT 1000",
-      "execution_pass": false,
+      "agent_sql": "SELECT sub_category, SUM(profit) AS total_profit FROM order_items GROUP BY sub_category HAVING SUM(profit) < 0 ORDER BY total_profit ASC\nLIMIT 1000",
+      "execution_pass": true,
       "gold_row_count": 2,
-      "agent_row_count": 17,
-      "gold_only_rows": [
-        [
-          -1236.0,
-          "Electronic Games"
-        ],
-        [
-          -4011.0,
-          "Tables"
-        ]
-      ],
-      "agent_only_rows": [
-        [
-          "Accessories"
-        ],
-        [
-          "Bookcases"
-        ],
-        [
-          "Chairs"
-        ],
-        [
-          "Electronic Games"
-        ],
-        [
-          "Furnishings"
-        ],
-        [
-          "Hankerchief"
-        ],
-        [
-          "Kurti"
-        ],
-        [
-          "Leggings"
-        ],
-        [
-          "Phones"
-        ],
-        [
-          "Printers"
-        ]
-      ],
-      "answer_text": "The following sub-categories are loss-making (negative total profit):\n\n1. T-shirt\n2. Skirt\n3. Bookcases\n4. Saree\n5. Electronic Games\n6. Tables\n7. Furnishings\n8. Kurti\n9. Shirt\n10. Hankerchief\n11. Trousers\n12. Chairs\n13. Phones\n14. Printers\n15. Leggings\n16. Accessories\n17. Stole",
+      "agent_row_count": 2,
+      "gold_only_rows": [],
+      "agent_only_rows": [],
+      "answer_text": "The sub-categories with negative total profit (loss-making) are:\n\n1. Tables - Total Profit: -4,011 INR\n2. Electronic Games - Total Profit: -1,236 INR",
       "key_value": "Tables",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT sub_category FROM order_items WHERE profit < 0 GROUP BY sub_category;')"
+        "tool_call: run_sql('SELECT sub_category, SUM(profit) AS total_profit FROM order_items GROUP BY sub_category HAVING SUM(profit) < 0 ORDER BY total_profit ASC;')"
       ]
     },
     {
       "difficulty": "hard",
       "question": "What is the monthly revenue trend over time?",
       "gold_sql": "SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue\nFROM orders o\nJOIN order_items oi ON o.order_id = oi.order_id\nGROUP BY month\nORDER BY month",
-      "agent_sql": "SELECT strftime(order_date, '%Y-%m') AS month, SUM(amount) AS revenue FROM order_items JOIN orders ON order_items.order_id = orders.order_id GROUP BY month ORDER BY month\nLIMIT 1000",
+      "agent_sql": "SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month\nLIMIT 1000",
       "execution_pass": true,
       "gold_row_count": 12,
       "agent_row_count": 12,
       "gold_only_rows": [],
       "agent_only_rows": [],
-      "answer_text": "The monthly revenue trend over time shows a fluctuating pattern, with some months experiencing higher revenue than others. The data provided covers the first 12 months of 2018 and 2019.",
+      "answer_text": "The monthly revenue trend over time shows a fluctuating pattern, with peaks in revenue during certain months.",
       "key_value": "2018-04",
       "key_value_mentioned": false,
       "synthesis_suspect": true,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"SELECT strftime(order_date, '%Y-%m') AS month, SUM(amount) AS revenue FROM order_items JOIN orders ON order_items.order_id = orders.order_id GROUP BY month ORDER BY month;\")"
+        "tool_call: run_sql(\"SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY month ORDER BY month;\")"
       ]
     },
     {
       "difficulty": "hard",
       "question": "For each category, which state has the highest revenue? (top state per category)",
       "gold_sql": "WITH cat_state AS (\n  SELECT oi.category, o.state, SUM(oi.amount) AS revenue\n  FROM orders o\n  JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY oi.category, o.state\n),\nranked AS (\n  SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY revenue DESC) AS rn\n  FROM cat_state\n)\nSELECT category, state, revenue\nFROM ranked\nWHERE rn = 1\nORDER BY category",
-      "agent_sql": "WITH revenue_by_state_category AS (\n    SELECT\n        category,\n        state,\n        SUM(amount) AS total_revenue\n    FROM\n        orders\n    JOIN\n        order_items ON orders.order_id = order_items.order_id\n    GROUP BY\n        category, state\n)\nSELECT\n    category,\n    state,\n    total_revenue,\n    RANK() OVER (PARTITION BY category ORDER BY total_revenue DESC) AS rank\nFROM\n    revenue_by_state_category\nORDER BY\n    category,\n    rank\nLIMIT 1000",
-      "execution_pass": false,
+      "agent_sql": "WITH agg AS (\n  SELECT \n    oi.category, \n    o.state, \n    SUM(oi.amount) AS revenue\n  FROM \n    orders o \n  JOIN \n    order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    oi.category, \n    o.state\n),\nranked AS (\n  SELECT \n    category, \n    state, \n    revenue, \n    ROW_NUMBER() OVER (PARTITION BY category ORDER BY revenue DESC) AS rnk\n  FROM \n    agg\n)\nSELECT \n  category, \n  state, \n  revenue \nFROM \n  ranked \nWHERE \n  rnk = 1\nORDER BY \n  category\nLIMIT 1000",
+      "execution_pass": true,
       "gold_row_count": 3,
-      "agent_row_count": 57,
-      "gold_only_rows": [
-        [
-          30566.0,
-          "Clothing",
-          "Madhya Pradesh"
-        ],
-        [
-          34045.0,
-          "Furniture",
-          "Madhya Pradesh"
-        ],
-        [
-          42493.0,
-          "Electronics",
-          "Maharashtra"
-        ]
-      ],
-      "agent_only_rows": [
-        [
-          1.0,
-          30566.0,
-          "Clothing",
-          "Madhya Pradesh"
-        ],
-        [
-          1.0,
-          34045.0,
-          "Furniture",
-          "Madhya Pradesh"
-        ],
-        [
-          1.0,
-          42493.0,
-          "Electronics",
-          "Maharashtra"
-        ],
-        [
-          10.0,
-          3582.0,
-          "Furniture",
-          "Uttar Pradesh"
-        ],
-        [
-          10.0,
-          4981.0,
-          "Electronics",
-          "Gujarat"
-        ],
-        [
-          10.0,
-          5073.0,
-          "Clothing",
-          "Karnataka"
-        ],
-        [
-          10569.0,
-          3.0,
-          "Electronics",
-          "Uttar Pradesh"
-        ],
-        [
-          1090.0,
-          19.0,
-          "Electronics",
-          "Tamil Nadu"
-        ],
-        [
-          11.0,
-          3529.0,
-          "Furniture",
-          "Jammu and Kashmir"
-        ],
-        [
-          11.0,
-          4050.0,
-          "Clothing",
-          "Nagaland"
-        ]
-      ],
-      "answer_text": "For each category, the state with the highest revenue is:\n\n1. Clothing: Madhya Pradesh\n2. Electronics: Maharashtra",
+      "agent_row_count": 3,
+      "gold_only_rows": [],
+      "agent_only_rows": [],
+      "answer_text": "For each category, the state with the highest revenue is:\n\n- Clothing: Madhya Pradesh\n- Electronics: Maharashtra\n- Furniture: Madhya Pradesh",
       "key_value": "Clothing",
       "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('WITH revenue_by_state_category AS (\\n    SELECT\\n        category,\\n        state,\\n        SUM(amount) AS total_revenue\\n    FROM\\n        orders\\n    JOIN\\n        order_items ON orders.order_id = order_items.order_id\\n    GROUP BY\\n        category, state\\n)\\nSELECT\\n    category,\\n    state,\\n    total_revenue,\\n    RANK() OVER (PARTITION BY category ORDER BY total_revenue DESC) AS rank\\nFROM\\n    revenue_by_state_category\\nORDER BY\\n    category,\\n    rank;')"
+        "tool_call: run_sql('WITH agg AS (\\n  SELECT \\n    oi.category, \\n    o.state, \\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    oi.category, \\n    o.state\\n),\\nranked AS (\\n  SELECT \\n    category, \\n    state, \\n    revenue, \\n    ROW_NUMBER() OVER (PARTITION BY category ORDER BY revenue DESC) AS rnk\\n  FROM \\n    agg\\n)\\nSELECT \\n  category, \\n  state, \\n  revenue \\nFROM \\n  ranked \\nWHERE \\n  rnk = 1\\nORDER BY \\n  category;')"
       ]
     },
     {
       "difficulty": "hard",
       "question": "Which category-months missed their sales target (actual revenue < target)?",
       "gold_sql": "WITH monthly_actuals AS (\n  SELECT oi.category, strftime(o.order_date, '%Y-%m') AS month_key, SUM(oi.amount) AS revenue\n  FROM orders o\n  JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY oi.category, month_key\n)\nSELECT ma.category, ma.month_key, ma.revenue AS actual_revenue, st.target\nFROM monthly_actuals ma\nJOIN sales_targets st ON ma.category = st.category AND ma.month_key = st.month_key\nWHERE ma.revenue < st.target\nORDER BY ma.category, ma.month_key",
-      "agent_sql": null,
+      "agent_sql": "WITH actuals_vs_target AS (\n  SELECT \n    strftime(o.order_date, '%Y-%m') AS month_key,\n    oi.category,\n    SUM(oi.amount) AS revenue\n  FROM \n    orders o \n  JOIN \n    order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    month_key, oi.category\n)\nSELECT \n  actuals_vs_target.month_key,\n  actuals_vs_target.category,\n  revenue,\n  st.target,\n  revenue < st.target AS missed_target\nFROM \n  actuals_vs_target\nJOIN \n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\nWHERE \n  revenue < st.target\nLIMIT 1000",
       "execution_pass": false,
       "gold_row_count": 20,
-      "agent_row_count": 0,
+      "agent_row_count": 20,
       "gold_only_rows": [
         [
           10400.0,
@@ -468,98 +372,110 @@
           "Clothing"
         ]
       ],
-      "agent_only_rows": [],
-      "answer_text": "I couldn't produce a valid query after 3 attempts. Last error: Parser Error: syntax error at or near \"\\\"\n\nLINE 25:     a.revenue \\u003c st.target\n                       ^",
+      "agent_only_rows": [
+        [
+          10400.0,
+          8121.0,
+          true,
+          "2018-04",
+          "Furniture"
+        ],
+        [
+          10500.0,
+          6220.0,
+          true,
+          "2018-05",
+          "Furniture"
+        ],
+        [
+          10600.0,
+          5532.0,
+          true,
+          "2018-06",
+          "Furniture"
+        ],
+        [
+          10717.0,
+          14000.0,
+          true,
+          "2018-09",
+          "Clothing"
+        ],
+        [
+          10800.0,
+          3483.0,
+          true,
+          "2018-07",
+          "Furniture"
+        ],
+        [
+          10900.0,
+          9538.0,
+          true,
+          "2018-08",
+          "Furniture"
+        ],
+        [
+          11000.0,
+          8704.0,
+          true,
+          "2018-09",
+          "Furniture"
+        ],
+        [
+          11100.0,
+          6766.0,
+          true,
+          "2018-10",
+          "Furniture"
+        ],
+        [
+          11400.0,
+          9474.0,
+          true,
+          "2018-12",
+          "Furniture"
+        ],
+        [
+          11488.0,
+          16000.0,
+          true,
+          "2018-10",
+          "Clothing"
+        ]
+      ],
+      "answer_text": "The category-months that missed their sales target (actual revenue < target) are:\n\n- 2018-07: Electronics\n- 2018-09: Clothing\n- 2018-06: Furniture\n- 2019-02: Clothing\n- 2019-02: Electronics\n- 2018-07: Furniture\n- 2018-10: Furniture\n- 2018-06: Clothing\n- 2018-05: Furniture\n- 2018-08: Furniture\n- 2018-08: Clothing\n- 2018-05: Clothing\n- 2019-01: Clothing\n- 2018-04: Furniture\n- 2018-12: Furniture\n- 2018-12: Clothing\n- 2018-09: Furniture\n- 2018-07: Clothing\n- 2018-09: Electronics\n- 2018-10: Clothing",
       "key_value": "Clothing",
-      "key_value_mentioned": false,
+      "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT category, month_key, revenue, target, target_attainment FROM actuals_vs_target WHERE target_attainment < 1')",
-        "sql_error (1/3): Catalog Error: Table with name actuals_vs_target does not exist!\nDid you mean \"sales_targets\"?\n\nLINE 1: ... category, month_key, revenue, target, target_attainment FROM actuals_vs_target WHERE target_attainment < 1\n                                                                         ^",
+        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  month_key,\\n  category,\\n  revenue,\\n  target,\\n  revenue < target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < target;\")",
+        "sql_error (1/3): Binder Error: Ambiguous reference to column name \"month_key\" (use: \"actuals_vs_target.month_key\" or \"st.month_key\")\n\nLINE 14:   month_key,\n           ^",
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql('SELECT category, month_key, revenue, target, target_attainment FROM sales_targets WHERE target_attainment < 1')",
-        "sql_error (2/3): Binder Error: Referenced column \"target_attainment\" not found in FROM clause!\nCandidate bindings: \"target\", \"category\"\n\nLINE 1: ..., revenue, target, target_attainment FROM sales_targets WHERE target_attainment < 1\n                                                                         ^",
+        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  actuals_vs_target.month_key,\\n  category,\\n  revenue,\\n  st.target,\\n  revenue < st.target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < st.target;\")",
+        "sql_error (2/3): Binder Error: Ambiguous reference to column name \"category\" (use: \"actuals_vs_target.category\" or \"st.category\")\n\nLINE 15:   category,\n           ^",
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH actuals AS (\\n    SELECT \\n        category, \\n        strftime(order_date, '%Y-%m') AS month_key, \\n        SUM(amount) AS revenue\\n    FROM \\n        orders\\n    JOIN \\n        order_items ON orders.order_id = order_items.order_id\\n    GROUP BY \\n        category, \\n        month_key\\n)\\nSELECT \\n    st.category, \\n    st.month_key, \\n    a.revenue, \\n    st.target, \\n    a.revenue / NULLIF(st.target, 0) AS target_attainment\\nFROM \\n    sales_targets st\\nJOIN \\n    actuals a ON st.category = a.category AND st.month_key = a.month_key\\nWHERE \\n    a.revenue \\\\u003c st.target;\")",
-        "sql_error (3/3): Parser Error: syntax error at or near \"\\\"\n\nLINE 25:     a.revenue \\u003c st.target\n                       ^"
+        "tool_call: run_sql(\"WITH actuals_vs_target AS (\\n  SELECT \\n    strftime(o.order_date, '%Y-%m') AS month_key,\\n    oi.category,\\n    SUM(oi.amount) AS revenue\\n  FROM \\n    orders o \\n  JOIN \\n    order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month_key, oi.category\\n)\\nSELECT \\n  actuals_vs_target.month_key,\\n  actuals_vs_target.category,\\n  revenue,\\n  st.target,\\n  revenue < st.target AS missed_target\\nFROM \\n  actuals_vs_target\\nJOIN \\n  sales_targets st ON actuals_vs_target.month_key = st.month_key AND actuals_vs_target.category = st.category\\nWHERE \\n  revenue < st.target;\")"
       ]
     },
     {
       "difficulty": "hard",
       "question": "What was the month-over-month revenue growth percentage?",
       "gold_sql": "WITH monthly AS (\n  SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.amount) AS revenue\n  FROM orders o\n  JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY month\n)\nSELECT\n  month,\n  revenue,\n  (revenue - LAG(revenue) OVER (ORDER BY month))\n    / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS mom_growth_pct\nFROM monthly\nORDER BY month",
-      "agent_sql": "WITH monthly_revenue AS (\n    SELECT\n        strftime(order_date, '%Y-%m') AS month_key,\n        SUM(order_items.amount) AS revenue\n    FROM\n        orders\n    JOIN\n        order_items ON orders.order_id = order_items.order_id\n    GROUP BY\n        strftime(order_date, '%Y-%m')\n)\nSELECT\n    month_key,\n    revenue,\n    LAG(revenue) OVER (ORDER BY month_key) AS prev_month_revenue,\n    (revenue - LAG(revenue) OVER (ORDER BY month_key)) / NULLIF(LAG(revenue) OVER (ORDER BY month_key), 0) * 100 AS month_over_month_growth_percentage\nFROM\n    monthly_revenue\nORDER BY\n    month_key DESC\nLIMIT 1",
-      "execution_pass": false,
+      "agent_sql": "WITH monthly_revenue AS (\n  SELECT \n    strftime(order_date, '%Y-%m') AS month,\n    SUM(amount) AS revenue\n  FROM \n    orders o \n    JOIN order_items oi ON o.order_id = oi.order_id\n  GROUP BY \n    month\n  ORDER BY \n    month\n)\nSELECT \n  month,\n  revenue,\n  (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth\nFROM \n  monthly_revenue\nLIMIT 1000",
+      "execution_pass": true,
       "gold_row_count": 12,
-      "agent_row_count": 1,
-      "gold_only_rows": [
-        [
-          -12.78,
-          28545.0,
-          "2018-05"
-        ],
-        [
-          -13.82,
-          26628.0,
-          "2018-09"
-        ],
-        [
-          -17.12,
-          23658.0,
-          "2018-06"
-        ],
-        [
-          -21.85,
-          37579.0,
-          "2018-12"
-        ],
-        [
-          -37.46,
-          38424.0,
-          "2019-02"
-        ],
-        [
-          -45.19,
-          12966.0,
-          "2018-07"
-        ],
-        [
-          138.31,
-          30899.0,
-          "2018-08"
-        ],
-        [
-          18.73,
-          31615.0,
-          "2018-10"
-        ],
-        [
-          32726.0,
-          "2018-04",
-          null
-        ],
-        [
-          48086.0,
-          52.1,
-          "2018-11"
-        ]
-      ],
-      "agent_only_rows": [
-        [
-          38424.0,
-          53.39,
-          58937.0,
-          "2019-03"
-        ]
-      ],
-      "answer_text": "The month-over-month revenue growth percentage for the most recent month shown (March 2019) was 53.39%.",
+      "agent_row_count": 12,
+      "gold_only_rows": [],
+      "agent_only_rows": [],
+      "answer_text": "The month-over-month revenue growth percentage for each month from 2018-04 to 2019-03 is as follows:\n\n| Month       | Revenue (INR) | Month-over-Month Growth (%) |\n|-------------|---------------|-----------------------------|\n| 2018-04     | 32,726.0      | NaN                         |\n| 2018-05     | 28,545.0      | -12.78%                     |\n| 2018-06     | 23,658.0      | -17.12%                     |\n| 2018-07     | 12,966.0      | -45.19%                     |\n| 2018-08     | 30,899.0      | 138.31%                     |\n| 2018-09     | 26,628.0      | -13.82%                     |\n| 2018-10     | 31,615.0      | 18.73%                      |\n| 2018-11     | 48,086.0      | 52.10%                      |\n| 2018-12     | 37,579.0      | -21.85%                     |\n| 2019-01     | 61,439.0      | 63.49%                      |\n| 2019-02     | 38,424.0      | -37.46%                     |\n| 2019-03     | 58,937.0      | 53.39%                      |",
       "key_value": "2018-04",
-      "key_value_mentioned": false,
+      "key_value_mentioned": true,
       "synthesis_suspect": false,
       "trace": [
         "fallback_extraction: recovered run_sql call from free text",
-        "tool_call: run_sql(\"WITH monthly_revenue AS (\\n    SELECT\\n        strftime(order_date, '%Y-%m') AS month_key,\\n        SUM(order_items.amount) AS revenue\\n    FROM\\n        orders\\n    JOIN\\n        order_items ON orders.order_id = order_items.order_id\\n    GROUP BY\\n        strftime(order_date, '%Y-%m')\\n)\\nSELECT\\n    month_key,\\n    revenue,\\n    LAG(revenue) OVER (ORDER BY month_key) AS prev_month_revenue,\\n    (revenue - LAG(revenue) OVER (ORDER BY month_key)) / NULLIF(LAG(revenue) OVER (ORDER BY month_key), 0) * 100 AS month_over_month_growth_percentage\\nFROM\\n    monthly_revenue\\nORDER BY\\n    month_key DESC\\nLIMIT 1;\")"
+        "tool_call: run_sql(\"WITH monthly_revenue AS (\\n  SELECT \\n    strftime(order_date, '%Y-%m') AS month,\\n    SUM(amount) AS revenue\\n  FROM \\n    orders o \\n    JOIN order_items oi ON o.order_id = oi.order_id\\n  GROUP BY \\n    month\\n  ORDER BY \\n    month\\n)\\nSELECT \\n  month,\\n  revenue,\\n  (revenue - LAG(revenue) OVER (ORDER BY month)) / NULLIF(LAG(revenue) OVER (ORDER BY month), 0) * 100 AS month_over_month_growth\\nFROM \\n  monthly_revenue;\")"
       ]
     }
   ]
