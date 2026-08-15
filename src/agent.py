@@ -147,8 +147,30 @@ def run_query_with_timeout(
     return outcome["df"]
 
 
+SQL_OPERATOR_UNESCAPES = [
+    ("\\u003c", "<"),
+    ("\\u003C", "<"),
+    ("\\u003e", ">"),
+    ("\\u003E", ">"),
+    ("\\u0026", "&"),
+    ("&lt;", "<"),
+    ("&gt;", ">"),
+    ("&amp;", "&"),
+]
+
+
+def unescape_sql_operators(query: str) -> str:
+    """Undo unicode/HTML escaping of comparison operators the model sometimes
+    applies to '<', '>', '&' (e.g. \\u003c, &lt;), which otherwise produces
+    syntactically invalid SQL that DuckDB can't parse."""
+    for escaped, literal in SQL_OPERATOR_UNESCAPES:
+        query = query.replace(escaped, literal)
+    return query
+
+
 def make_run_sql(con: duckdb.DuckDBPyConnection):
     def run_sql(query: str) -> dict:
+        query = unescape_sql_operators(query)
         sql = validate_and_prepare_sql(query)
         df = run_query_with_timeout(con, sql, QUERY_TIMEOUT_SECONDS)
         df = df.head(MAX_ROWS)
@@ -195,6 +217,50 @@ Rules:
 - If run_sql returns an error, read the error and fix your query. You have a limited number of retries.
 - When you have the answer, respond with a concise natural-language answer. The application
   displays the SQL and result table separately, so do not repeat the raw table row by row.
+
+SQL rules (DuckDB dialect):
+- Order-level metrics (e.g. average order value) use SUM(amount) / COUNT(DISTINCT order_id).
+  NEVER use AVG(amount) over order_items rows -- that averages line items, not orders.
+- To filter on an AGGREGATE (e.g. "loss-making" = total profit < 0), GROUP BY first and filter
+  with HAVING SUM(...) < 0. NEVER filter with a row-level WHERE on the unaggregated column --
+  that keeps any group with at least one matching row, not groups whose total matches.
+- For "top N per group", compute a window rank (ROW_NUMBER/RANK) in a CTE, then filter
+  WHERE rank = 1 in the outer query. Returning the whole ranked table without that outer filter
+  is wrong even if the ranking itself is correct.
+- For a "trend over time" question, return ALL periods ordered ascending. NEVER add
+  LIMIT 1 (or any LIMIT that cuts off periods) to a trend/time-series query.
+- Use the metric definitions in the semantic layer verbatim rather than re-deriving them.
+
+Examples (patterns only -- adapt table/column names to the actual question):
+
+Q: "What is the average revenue per order?"
+SQL: SELECT SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value
+     FROM orders o JOIN order_items oi ON o.order_id = oi.order_id;
+
+Q: "Which cities have negative total profit?"
+SQL: SELECT o.city, SUM(oi.profit) AS total_profit
+     FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+     GROUP BY o.city
+     HAVING SUM(oi.profit) < 0
+     ORDER BY total_profit ASC;
+
+Q: "For each state, which city generated the highest revenue?"
+SQL: WITH agg AS (
+       SELECT o.state, o.city, SUM(oi.amount) AS revenue
+       FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+       GROUP BY o.state, o.city
+     ),
+     ranked AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY state ORDER BY revenue DESC) AS rnk
+       FROM agg
+     )
+     SELECT state, city, revenue FROM ranked WHERE rnk = 1 ORDER BY state;
+
+Q: "Show quantity sold by month over the full year."
+SQL: SELECT strftime(o.order_date, '%Y-%m') AS month, SUM(oi.quantity) AS units_sold
+     FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+     GROUP BY month
+     ORDER BY month;  -- no LIMIT: a trend needs every period
 
 === SEMANTIC LAYER ===
 {semantic_layer}
