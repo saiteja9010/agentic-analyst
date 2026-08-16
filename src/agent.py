@@ -907,6 +907,10 @@ def answer_why(
                 "sql": result["sql"],
                 "row_count": len(df),
                 "finding": finding,
+                # Raw rows, kept only so a presentation layer (e.g. src/charts.py) can chart
+                # the specific step a conclusion is based on without re-running SQL. Doesn't
+                # affect the finding/dominance computation above or anything the model sees.
+                "rows": df.to_dict(orient="records"),
             }
             if had_limit:
                 step_record["normalized"] = (
@@ -1147,6 +1151,10 @@ def format_table(rows: list[dict]) -> str:
 
 
 def repl() -> None:
+    # Imported lazily (not at module level) to avoid a circular import: charts.py imports
+    # PERIOD_RE from this module, so this module can't import charts.py at load time.
+    from charts import maybe_render_chart, pick_key_why_step
+
     print("Autonomous Analyst -- ask a question about orders / order_items / sales_targets.")
     print("Type 'exit' or 'quit' to leave.\n")
     client = build_client()
@@ -1169,6 +1177,11 @@ def repl() -> None:
                 print("\nREASONING TRACE:")
                 print(format_why_trace(result["steps"]))
             print(f"\n{result['answer_text']}\n")
+
+            key_step = pick_key_why_step(result["steps"])
+            chart_path = maybe_render_chart(key_step["rows"]) if key_step else None
+            if chart_path:
+                print(f"Chart: {chart_path}\n")
         else:
             result = answer_question(question, history=history, client=client)
 
@@ -1180,6 +1193,10 @@ def repl() -> None:
             if result["rows"]:
                 print(format_table(result["rows"]))
                 print()
+
+            chart_path = maybe_render_chart(result["rows"])
+            if chart_path:
+                print(f"Chart: {chart_path}\n")
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": result["answer_text"]})

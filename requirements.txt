@@ -4,3 +4,4 @@ python-dotenv==1.2.2
 openai==2.54.0
 pyyaml==6.0.3
 pytest==9.1.1
+matplotlib==3.11.1
