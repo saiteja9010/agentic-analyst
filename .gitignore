@@ -1,5 +1,4 @@
 .env
-data/raw/
 *.duckdb
 .venv/
 __pycache__/

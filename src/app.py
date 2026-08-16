@@ -19,6 +19,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import (  # noqa: E402
+    DB_PATH,
     LLM_BASE_URL,
     LLM_MODEL,
     answer_question,
@@ -28,6 +29,14 @@ from agent import (  # noqa: E402
     is_why_question,
 )
 from charts import maybe_render_chart, pick_key_why_step  # noqa: E402
+
+if not os.path.exists(DB_PATH):
+    # Cold start on a fresh checkout (e.g. a Hugging Face Space, which only gets a git clone,
+    # not a locally-built warehouse.duckdb -- that file is gitignored). ingest.py's own CSVs
+    # are committed and small (~90KB total), so this runs once per Space boot and is cheap.
+    import ingest  # noqa: E402
+
+    ingest.main()
 
 EXAMPLE_QUESTIONS = [
     "What is total revenue by state?",

@@ -217,3 +217,23 @@ python src/eval/run_why.py    # prints the two demo root-cause traces end to end
 
 Secrets (API keys) only ever live in `.env`, which is gitignored — `.env.example` is the
 committed template with placeholder values.
+
+### Deploying your own Space
+
+The live demo above runs on a free [Hugging Face Space](https://huggingface.co/spaces) (Streamlit
+SDK) against Groq. To deploy your own:
+
+1. Create a new Space — SDK: **Streamlit**, hardware: free CPU basic. HF's creation wizard writes
+   the Space's own `README.md` (a separate file in the Space's git repo, not this one) with the
+   required frontmatter; set `app_file: src/app.py` there and `sdk_version` to match
+   `requirements.txt`'s pinned `streamlit==1.61.1`.
+2. Push this repo's contents to the Space's git remote (or link the Space to sync from this
+   GitHub repo, from the Space's Settings page).
+3. In the Space's **Settings → Repository secrets**, set `LLM_BASE_URL`, `LLM_MODEL`, and
+   `LLM_API_KEY` (e.g. the Groq values from Option B above) — the Space never gets a `.env` file,
+   so these three env vars are how it configures the same provider-agnostic client used locally.
+4. Nothing else to build by hand: `data/raw/*.csv` are committed (small, public Ben Roshan data,
+   ~90KB total), and `src/app.py` calls `ingest.py` automatically on cold start whenever
+   `data/warehouse.duckdb` is missing — which it always is on a fresh Space checkout, since that
+   file itself stays gitignored. First load after each Space (re)build is a few seconds slower
+   for this one-time build; every load after that reuses the same warehouse file.
