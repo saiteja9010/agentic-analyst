@@ -102,7 +102,12 @@ def render_message(msg: dict) -> None:
     if msg.get("rows"):
         st.dataframe(pd.DataFrame(msg["rows"]), width="stretch")
     if msg.get("chart_path") and os.path.exists(msg["chart_path"]):
-        st.image(msg["chart_path"], width="stretch")
+        # Fixed, bounded width (not "stretch") -- in the wide layout, stretching a chart PNG to
+        # the full container upscales it well past its native ~800x450px resolution and makes
+        # it look oversized/blurry. Centered in the middle of a 1:3:1 column split so it reads
+        # as a bounded figure under the full-width table above it, not a full-viewport image.
+        chart_col = st.columns([1, 3, 1])[1]
+        chart_col.image(msg["chart_path"], width=700)
 
 
 if "messages" not in st.session_state:
