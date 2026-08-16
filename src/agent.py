@@ -24,7 +24,10 @@ DB_PATH = os.getenv("DUCKDB_PATH", "data/warehouse.duckdb")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5-coder:7b")
-NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
+# Ollama-only tuning knob, sent via `extra_body` (Ollama's OpenAI-compat shim accepts its native
+# /api/chat options this way). Left unset entirely for any other provider (Groq, Anthropic, ...)
+# -- not defaulted, so its presence/absence is what decides whether extra_body is sent at all.
+NUM_CTX = os.getenv("LLM_NUM_CTX")
 
 SEMANTIC_LAYER_PATH = Path(__file__).parent / "semantic_layer.yaml"
 
@@ -1020,7 +1023,9 @@ def answer_question(
     has_called_tool = False
     nudge_used = False
 
-    completion_kwargs: dict = {"extra_body": {"options": {"num_ctx": NUM_CTX}}}
+    completion_kwargs: dict = {}
+    if NUM_CTX:
+        completion_kwargs["extra_body"] = {"options": {"num_ctx": int(NUM_CTX)}}
     if temperature is not None:
         completion_kwargs["temperature"] = temperature
     if seed is not None:
