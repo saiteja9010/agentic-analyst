@@ -428,15 +428,31 @@ SQL rules (same as the rest of the Analyst):
 - Single statement, SELECT/WITH only. No semicolons, no DDL/DML.
 - Break the metric down by ONE new dimension per step (e.g. category, city, month) to narrow in
   on what is driving it -- do not repeat a breakdown already listed in "Findings so far" below.
-- GROUP BY the dimension and ORDER BY the metric so the extremes are easy to compute.
+- GROUP BY the dimension and return EVERY group -- the full breakdown (all categories, all
+  months, all cities in that dimension). NEVER use a LIMIT clause in a breakdown query, of ANY
+  size -- not "LIMIT 1", not "LIMIT 2", not any number. "LIMIT 2" is still wrong even though 2
+  rows technically compare against each other: it silently drops every group except the top 2,
+  so a "share" computed from it is measured against a cherry-picked subset, not the real total
+  -- any LIMIT you add will be silently removed before the query runs, so the finding you get
+  back will be for the FULL breakdown regardless, not the subset you intended; write it without
+  one from the start. ORDER BY the metric is fine (it doesn't remove rows); a LIMIT does. If you
+  want to compare two SPECIFIC periods/categories, filter with WHERE ... IN (...) instead of
+  LIMIT -- that keeps exactly the groups you named, no others silently dropped.
 - Start broad (the metric in the question, broken down by whichever dimension it most directly
   references) and narrow further each step based on the findings so far.
+- If a "finding" you're given includes a "time_series" object: its "biggest_swing" tells you
+  which two consecutive periods changed the most (NOT which period has the highest value -- a
+  different thing). If the question asks WHY that change happened, a good next step is to break
+  the LATER period of that swing down by another dimension (e.g. category) -- optionally also
+  query the EARLIER period the same way, so the two can be compared as a baseline. Still return
+  the full breakdown, not a top-1 LIMIT.
 
 Example (pattern only, adapt table/column/dimension names to the actual question -- this is not
 one of the questions you will be asked):
 Step 1 reason: "Average order value dropped -- break down by city to see where it's concentrated."
 Step 1 SQL: SELECT o.city, SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value
-            FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY o.city ORDER BY avg_order_value;
+            FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+            GROUP BY o.city ORDER BY avg_order_value;  -- no LIMIT: every city, not just the lowest
 
 === SEMANTIC LAYER ===
 {semantic_layer}
@@ -454,23 +470,32 @@ message gives you this turn. If you catch yourself writing a number or a categor
 label that you cannot point to inside that JSON, delete it and look again.
 
 Rules:
-- If a step's finding has a non-null "dominant_driver": that object has a nested "extreme_row"
-  (a dict with the dimension's label and its numeric value) and an "extreme_share_pct". State
-  the extreme_row's label, the extreme_row's number, and the extreme_share_pct -- pulled
-  directly from that JSON object, nothing else.
-- If no step's finding has a "dominant_driver" (it is null on every step), say so honestly:
-  from the LAST successful step's finding, pick either "max_row"+"max_share_pct" or
-  "min_row"+"min_share_pct" from ONE column in "per_column" (whichever direction matches what
-  the question is asking about), state that label/number/percentage, and say plainly that no
-  single dimension clearly dominates. Do NOT fabricate a clean single-driver story when the
-  data doesn't show one.
+- The top-level "dominance_verdict" field is the single source of truth for whether a driver
+  was isolated -- it is either "ISOLATED" or "NOT_ISOLATED", already decided in code. Do not
+  re-derive this yourself by scanning the steps. The paired "dominance_instruction" field tells
+  you exactly what you must (and must not) write; follow it word for word:
+  - "ISOLATED": name the driver ("extreme_row" + "extreme_share_pct" of the step's
+    "dominant_driver"). Never write any variant of "no single X dominates" in this case.
+  - "NOT_ISOLATED": say plainly that no single dimension dominates. Never name a specific row
+    as "the driver", "responsible for", "drove it", or similar in this case, even hedged -- not
+    even one you first call out as merely "the highest" or "the largest". It is fine to mention
+    the observed range (max_row/min_row values) as background, but never phrase either as if it
+    were a driver in a conclusion that just said none exists.
+- If any step's finding has a non-null "time_series" object: its "biggest_swing" field names
+  which two periods changed the most -- "from_period"/"from_value" and "to_period"/"to_value",
+  plus "delta" and "pct_change", all literal fields to state verbatim. This answers "WHICH
+  period changed the most" and is a separate fact from the dominant-driver check above (rule A/B
+  is about WHICH DIMENSION-VALUE explains the change once you're inside a period, e.g. WHICH
+  category) -- stating a time_series swing is never a contradiction of a "no dominant driver"
+  conclusion about a *different* breakdown, because they answer different questions. Do not
+  compute your own delta or percentage; use "delta" and "pct_change" as given.
 - A single claim (one row's label + number + percentage) must ALL come from the SAME finding
   object of the SAME step. Never combine a label from one step's finding with a number or
   percentage from a different step's finding, and never combine a "max_row" label with a
   "min_row" number (or vice versa) within the same column.
 - Every number you write must be a value that literally appears in the JSON (e.g. a
-  "max_share_pct" or "min_share_pct" field) -- never compute, combine, or round a percentage
-  yourself, even from real numbers that ARE in the JSON.
+  "max_share_pct", "min_share_pct", "delta", or "pct_change" field) -- never compute, combine,
+  or round a percentage yourself, even from real numbers that ARE in the JSON.
 - Quote period/category/city labels exactly as they appear in the JSON, character for character
   (e.g. a label written "2018-07" must stay "2018-07", not become "July 2018").
 - Match your wording to the actual sign of the number you cite, regardless of how the question
@@ -481,22 +506,80 @@ Rules:
 - Be concise: 2-4 sentences."""
 
 
+PERIOD_RE = re.compile(r"^\d{4}-\d{2}$")  # matches this dataset's 'YYYY-MM' month labels
+
+
+def _compute_time_series(df: pd.DataFrame, label_cols: list[str], numeric_cols: list[str]) -> dict | None:
+    """When a breakdown is a single period-labelled dimension against a single metric (e.g.
+    month vs revenue), compute the largest period-over-period swing from the FULL series --
+    this is what "which month drove the biggest change" actually means, as opposed to "which
+    month has the highest value" (a different question the magnitude-based dominant_driver
+    above would answer). Labels are re-sorted here regardless of the SQL's own ORDER BY, since
+    'YYYY-MM' string order is chronological order and the delta calculation depends on it.
+    Returns None when the shape doesn't match (not exactly one label + one metric column, or
+    the labels aren't all 'YYYY-MM'-shaped)."""
+    if len(label_cols) != 1 or len(numeric_cols) != 1:
+        return None
+    label_col, metric_col = label_cols[0], numeric_cols[0]
+    if not df[label_col].astype(str).map(lambda v: bool(PERIOD_RE.match(v))).all():
+        return None
+
+    ordered = df[[label_col, metric_col]].dropna(subset=[metric_col]).sort_values(label_col).reset_index(drop=True)
+    if len(ordered) < 2:
+        return None
+
+    deltas = ordered[metric_col].diff().iloc[1:]  # index i holds ordered[i] - ordered[i-1]
+    total_abs_delta = float(deltas.abs().sum())
+    swing_idx = int(deltas.abs().idxmax())
+    from_row, to_row = ordered.loc[swing_idx - 1], ordered.loc[swing_idx]
+    delta = float(to_row[metric_col] - from_row[metric_col])
+    from_value = float(from_row[metric_col])
+    pct_change = round(delta / from_value * 100, 1) if from_value else None
+    swing_share_pct = round(abs(delta) / total_abs_delta * 100, 1) if total_abs_delta else None
+
+    return {
+        "period_column": label_col,
+        "metric_column": metric_col,
+        "biggest_swing": {
+            "from_period": str(from_row[label_col]),
+            "from_value": from_value,
+            "to_period": str(to_row[label_col]),
+            "to_value": float(to_row[metric_col]),
+            "delta": delta,
+            "pct_change": pct_change,
+            "swing_share_pct": swing_share_pct,
+        },
+    }
+
+
 def compute_step_finding(df: pd.DataFrame) -> dict:
     """Deterministically compute the salient facts from a drill-down step's result: for each
     numeric column, the row with the largest-magnitude value and its share of the column's
     total absolute magnitude across all rows. This is the "don't trust the 7B to eyeball which
     row moved most" step -- the model only ever sees these code-computed numbers, never the
-    raw table itself.
+    raw table itself. Callers must only pass a df with >= 2 rows (see answer_why(), which
+    rejects single-row breakdown results before computing a finding -- a single row can't
+    support a share/dominance comparison, and returning one instead of the full grouped
+    breakdown is exactly the "collapsed to top-1" failure mode this function exists to avoid).
 
     "dominant_driver" is set when a single row's magnitude accounts for >= DRIVER_DOMINANCE_PCT
-    of a breakdown's total magnitude (only evaluated when there's more than one row -- a single
-    aggregate row isn't a "driver" of anything).
+    of a breakdown's total magnitude. "time_series" is set instead (see _compute_time_series)
+    when the shape is a single period-labelled dimension against a single metric -- answers
+    "which period changed most" rather than "which row has the highest value".
     """
     if df.empty:
-        return {"row_count": 0, "numeric_columns": [], "label_columns": [], "per_column": {}, "dominant_driver": None}
+        return {
+            "row_count": 0,
+            "numeric_columns": [],
+            "label_columns": [],
+            "per_column": {},
+            "dominant_driver": None,
+            "time_series": None,
+        }
 
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     label_cols = [c for c in df.columns if c not in numeric_cols]
+    time_series = _compute_time_series(df, label_cols, numeric_cols)
 
     per_column: dict = {}
     dominant_driver = None
@@ -542,6 +625,7 @@ def compute_step_finding(df: pd.DataFrame) -> dict:
         "label_columns": label_cols,
         "per_column": per_column,
         "dominant_driver": dominant_driver,
+        "time_series": time_series,
     }
 
 
@@ -600,9 +684,10 @@ def build_drill_user_prompt(question: str, steps: list[dict], history: list[dict
         lines.append("")
         if steps[-1].get("error"):
             lines.append(
-                f"IMPORTANT: step {steps[-1]['step']}'s SQL FAILED with the error shown above. Read "
-                "the error message and fix the actual problem it names (e.g. add a missing JOIN, "
-                "correct a column/table name) -- do NOT resubmit that same SQL unchanged."
+                f"IMPORTANT: step {steps[-1]['step']} did not produce a usable result -- see the "
+                "error above. Read it and fix the actual problem it names (e.g. add a missing "
+                "JOIN, correct a column/table name, or remove a LIMIT/filter that collapsed the "
+                "breakdown to one row) -- do NOT resubmit that same SQL unchanged."
             )
         lines.append(
             f"Propose step {len(steps) + 1} of at most {MAX_WHY_STEPS}, narrowing further based on "
@@ -645,14 +730,35 @@ def synthesize_why_conclusion(
         "hit_step_limit_without_isolating_a_driver": hit_step_limit,
     }
 
-    # Code-computed sign check: the model has repeatedly mislabeled a positive dominant_driver
-    # as a "loss"/"decline" when the question used that wording, despite a system-prompt
-    # instruction against it -- a deterministic check placed right next to the data it's
-    # about is far more reliably followed than a rule buried in the system prompt.
+    # Code-computed dominance verdict: asking the model to infer "is there a dominant_driver
+    # anywhere in these nested per-step findings" and branch its wording accordingly was not
+    # reliable -- it has produced conclusions that state "no single category dominates" AND
+    # name a specific 46.6%-share driver in the very same sentence. Settling the yes/no
+    # question in code and handing back one unambiguous top-level field (same pattern as the
+    # sign_check below, which does work reliably) removes that inference step entirely.
     dominant = next(
         (s["finding"]["dominant_driver"] for s in successful_steps if s.get("finding", {}).get("dominant_driver")),
         None,
     )
+    if dominant:
+        payload["dominance_verdict"] = "ISOLATED"
+        payload["dominance_instruction"] = (
+            "A dominant driver WAS isolated. You MUST name it in your conclusion: label="
+            f"{dominant['extreme_row']}, share_pct={dominant['extreme_share_pct']}. Do NOT write "
+            "any variant of 'no single X dominates' anywhere in your answer -- one already did."
+        )
+    else:
+        payload["dominance_verdict"] = "NOT_ISOLATED"
+        payload["dominance_instruction"] = (
+            "NO dominant driver was isolated in any step. You MUST say plainly that no single "
+            "dimension dominates, and must NOT name any specific row as 'the driver', "
+            "'responsible', or similar anywhere in your answer -- not even hedged."
+        )
+
+    # Code-computed sign check: the model has repeatedly mislabeled a positive dominant_driver
+    # as a "loss"/"decline" when the question used that wording, despite a system-prompt
+    # instruction against it -- a deterministic check placed right next to the data it's
+    # about is far more reliably followed than a rule buried in the system prompt.
     if dominant and NEGATIVE_INTENT_RE.search(question):
         value = dominant["extreme_row"].get(dominant["column"])
         if isinstance(value, (int, float)) and value > 0:
@@ -678,6 +784,23 @@ def synthesize_why_conclusion(
         kwargs["seed"] = seed
     response = client.chat.completions.create(model=LLM_MODEL, messages=messages, **kwargs)
     return response.choices[0].message.content or "(no conclusion produced)"
+
+
+LIMIT_CLAUSE_RE = re.compile(r"\bLIMIT\s+\d+(\s+OFFSET\s+\d+)?\b", re.IGNORECASE)
+
+
+def strip_drill_limit(sql: str) -> tuple[str, bool]:
+    """Drill breakdown queries must return every row of a GROUP BY so the code-side dominance
+    computation sees the real total, not a top-N subset. Rejecting a LIMIT-ed query and asking
+    the model to retry was tried first and failed in practice: it got stuck resubmitting the
+    identical LIMIT-ed SQL across every remaining step instead of removing it. Since the fix is
+    always mechanical (delete the clause), strip it in code and proceed -- guarantees forward
+    progress regardless of whether the model would have self-corrected.
+
+    Returns (possibly-modified sql, whether a LIMIT clause was found and removed).
+    """
+    stripped = LIMIT_CLAUSE_RE.sub("", sql).strip()
+    return stripped, stripped != sql.strip()
 
 
 def answer_why(
@@ -741,6 +864,8 @@ def answer_why(
                 continue  # let the model try again next step, same self-correct spirit as answer_question
 
             sql = unescape_sql_operators(sql)
+            sql, had_limit = strip_drill_limit(sql)
+
             try:
                 result = run_sql(sql)
             except (SQLGuardError, duckdb.Error) as exc:
@@ -750,17 +875,45 @@ def answer_why(
                 continue  # self-correct: the error is fed back into the next step's prompt
 
             df = result["df"]
+            if len(df) < 2:
+                # A single row can't support a share/dominance comparison -- this is the
+                # "collapsed to top-1 instead of the full breakdown" failure mode. Reject it as
+                # a retryable error (not a valid finding) rather than quietly accepting it;
+                # don't advance last_sql/last_df so the returned "rows" stay the last USEFUL
+                # breakdown, not a degenerate single-row artifact.
+                steps.append(
+                    {
+                        "step": step_num,
+                        "reason": reason or "(model gave no reason)",
+                        "sql": result["sql"],
+                        "row_count": len(df),
+                        "error": (
+                            f"This query returned {len(df)} row(s). A drill breakdown must return "
+                            "the FULL grouped result (>=2 rows -- every category/month/city in the "
+                            "breakdown, not a top-1 LIMIT) so a dominant contributor can be computed "
+                            "by comparing shares. Remove any LIMIT and any filter that collapses the "
+                            "breakdown to one row, then try again."
+                        ),
+                        "finding": None,
+                    }
+                )
+                continue
+
             last_sql, last_df = result["sql"], df
             finding = compute_step_finding(df)
-            steps.append(
-                {
-                    "step": step_num,
-                    "reason": reason or "(model gave no reason)",
-                    "sql": result["sql"],
-                    "row_count": len(df),
-                    "finding": finding,
-                }
-            )
+            step_record = {
+                "step": step_num,
+                "reason": reason or "(model gave no reason)",
+                "sql": result["sql"],
+                "row_count": len(df),
+                "finding": finding,
+            }
+            if had_limit:
+                step_record["normalized"] = (
+                    "the model's SQL had a LIMIT clause; it was stripped so the full grouped "
+                    "breakdown ran instead of a top-N subset"
+                )
+            steps.append(step_record)
             if finding.get("dominant_driver"):
                 break
 
@@ -776,8 +929,10 @@ def answer_why(
 
 
 def format_why_trace(steps: list[dict]) -> str:
-    """Render the drill-down reasoning trace: step, reason, SQL, key finding -- the
-    inspectable chain behind the final conclusion."""
+    """Render the drill-down reasoning trace: step, reason, SQL, row count, key finding -- the
+    inspectable chain behind the final conclusion. Every successful step here has >= 2 rows
+    (answer_why() rejects single-row breakdowns as retryable errors before a finding is ever
+    computed), so a printed finding always reflects a genuine multi-row comparison."""
     lines = []
     for s in steps:
         lines.append(f"Step {s['step']}: {s['reason']}")
@@ -785,24 +940,32 @@ def format_why_trace(steps: list[dict]) -> str:
         if s.get("error"):
             lines.append(f"  -> error: {s['error']}")
             continue
+        if s.get("normalized"):
+            lines.append(f"  -> normalized: {s['normalized']}")
         finding = s.get("finding") or {}
+        lines.append(f"  -> {finding.get('row_count')} rows returned")
+        time_series = finding.get("time_series")
+        if time_series:
+            swing = time_series["biggest_swing"]
+            lines.append(
+                f"  -> time_series swing in {time_series['metric_column']!r}: "
+                f"{swing['from_period']} ({swing['from_value']}) -> {swing['to_period']} "
+                f"({swing['to_value']}), delta={swing['delta']} ({swing['pct_change']}%), "
+                f"swing_share={swing['swing_share_pct']}% of total movement"
+            )
         dominant = finding.get("dominant_driver")
         if dominant:
             lines.append(
-                f"  -> finding: dominant driver in {dominant['column']!r} "
+                f"  -> dominant driver in {dominant['column']!r} "
                 f"({dominant['extreme_share_pct']}% of total magnitude): {dominant['extreme_row']}"
             )
-        elif finding.get("row_count") == 1:
-            per_column = finding.get("per_column", {})
-            single = ", ".join(f"{col}={stats['max_row'].get(col)}" for col, stats in per_column.items())
-            lines.append(f"  -> finding: single row ({single}) -- no other rows to compare a share against")
         else:
             per_column = finding.get("per_column", {})
             summary = ", ".join(
-                f"{col}: extreme={stats['extreme_row']} ({stats['extreme_share_pct']}%)"
+                f"{col}: extreme={stats['extreme_row']} ({stats['extreme_share_pct']}%, no dominant driver)"
                 for col, stats in per_column.items()
             )
-            lines.append(f"  -> finding: {summary or '(no numeric columns to summarize)'}")
+            lines.append(f"  -> {summary or '(no numeric columns to summarize)'}")
     return "\n".join(lines)
 
 
