@@ -1,3 +1,13 @@
+---
+title: Autonomous Analyst
+emoji: 📊
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+app_file: src/app.py
+pinned: false
+---
+
 # Autonomous Analyst
 
 Autonomous Analyst — an agentic text-to-SQL system that answers business questions over an
@@ -223,10 +233,10 @@ committed template with placeholder values.
 The live demo above runs on a free [Hugging Face Space](https://huggingface.co/spaces) (Streamlit
 SDK) against Groq. To deploy your own:
 
-1. Create a new Space — SDK: **Streamlit**, hardware: free CPU basic. HF's creation wizard writes
-   the Space's own `README.md` (a separate file in the Space's git repo, not this one) with the
-   required frontmatter; set `app_file: src/app.py` there and `sdk_version` to match
-   `requirements.txt`'s pinned `streamlit==1.61.1`.
+1. Create a new Space — SDK: **Streamlit**, hardware: free CPU basic. This repo's own
+   `README.md` already carries the required Spaces YAML frontmatter at the very top
+   (`sdk: streamlit`, `app_file: src/app.py`, ...), so no separate Space-side README needs to be
+   hand-written.
 2. Push this repo's contents to the Space's git remote (or link the Space to sync from this
    GitHub repo, from the Space's Settings page).
 3. In the Space's **Settings → Repository secrets**, set `LLM_BASE_URL`, `LLM_MODEL`, and
