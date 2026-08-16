@@ -379,6 +379,433 @@ def synthesize_final_answer(
     return response.choices[0].message.content or "(no answer produced)"
 
 
+WHY_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\bwhy\b",
+        r"\bwhat\s+caused\b",
+        r"\bwhat(?:'s| is| was)\s+driving\b",
+        r"\bdrivers?\s+(?:of|behind)\b",
+        r"\broot\s+cause\b",
+        r"\bexplain\s+the\s+(?:drop|decline|decrease|fall|increase|rise|surge|jump|spike)\b",
+        r"\breasons?\s+(?:for|behind)\b",
+    ]
+]
+
+
+def is_why_question(question: str) -> bool:
+    """Conservative "why"-detector: only routes to answer_why() on an explicit ask for a
+    cause ("why", "what caused", "what's driving", "driver of/behind", "root cause",
+    "explain the drop/rise/...", "reason for/behind"). Anything else -- including plain
+    factual, ranking, and trend questions -- stays on the normal answer_question() path."""
+    return any(pattern.search(question or "") for pattern in WHY_PATTERNS)
+
+
+# === Root-cause drill-down (answer_why) ===
+#
+# A separate, bounded mode: does not modify or call into answer_question(). Reuses the same
+# guardrailed run_sql tool (read-only, allowlist, LIMIT, timeout, self-correct, PII strip) via
+# make_run_sql(), and the same anti-hallucination discipline as synthesize_final_answer() --
+# every claim in the final conclusion must trace to a row that actually ran this turn.
+
+MAX_WHY_STEPS = 4
+DRIVER_DOMINANCE_PCT = 40.0  # one row explaining >= this % of a breakdown's total magnitude
+                             # counts as an isolated driver and stops the loop early.
+NEGATIVE_INTENT_RE = re.compile(r"\bloss|declin|drop|fell|decrease|negative\b", re.IGNORECASE)
+
+DRILL_SYSTEM_PROMPT = """You are the Autonomous Analyst's root-cause drill-down assistant. You \
+investigate WHY a metric changed or differs across a dimension by running one small SQL \
+breakdown query per step. After each step you are given a "finding" that is COMPUTED BY CODE \
+from the actual result -- that finding is ground truth; never trust your own reading of a raw \
+table over it.
+
+You have at most {max_steps} steps. On EVERY step, respond with ONLY a single JSON object, \
+nothing else, of the form:
+{{"reason": "<one line: why this sub-query is the next thing to check>", "sql": "<a single DuckDB SELECT/WITH statement>"}}
+
+SQL rules (same as the rest of the Analyst):
+- DuckDB dialect. Use ONLY tables/columns in the semantic layer below. Never invent columns.
+- Single statement, SELECT/WITH only. No semicolons, no DDL/DML.
+- Break the metric down by ONE new dimension per step (e.g. category, city, month) to narrow in
+  on what is driving it -- do not repeat a breakdown already listed in "Findings so far" below.
+- GROUP BY the dimension and ORDER BY the metric so the extremes are easy to compute.
+- Start broad (the metric in the question, broken down by whichever dimension it most directly
+  references) and narrow further each step based on the findings so far.
+
+Example (pattern only, adapt table/column/dimension names to the actual question -- this is not
+one of the questions you will be asked):
+Step 1 reason: "Average order value dropped -- break down by city to see where it's concentrated."
+Step 1 SQL: SELECT o.city, SUM(oi.amount) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value
+            FROM orders o JOIN order_items oi ON o.order_id = oi.order_id GROUP BY o.city ORDER BY avg_order_value;
+
+=== SEMANTIC LAYER ===
+{semantic_layer}
+=== END SEMANTIC LAYER ==="""
+
+WHY_SYNTHESIS_SYSTEM_PROMPT = """You write the final root-cause conclusion for the Autonomous \
+Analyst's drill-down. You are given the full drill path: each step's reason, SQL, and a \
+code-computed "finding" (ground truth, not your own reading of a table). Summarize ONLY from \
+these findings -- never use outside knowledge, never invent a cause, never invent a number. \
+Currency values are in INR.
+
+This system prompt contains NO example numbers or names anywhere below -- every number and
+every label you write MUST be copied character-for-character out of the JSON payload the user
+message gives you this turn. If you catch yourself writing a number or a category/city/month
+label that you cannot point to inside that JSON, delete it and look again.
+
+Rules:
+- If a step's finding has a non-null "dominant_driver": that object has a nested "extreme_row"
+  (a dict with the dimension's label and its numeric value) and an "extreme_share_pct". State
+  the extreme_row's label, the extreme_row's number, and the extreme_share_pct -- pulled
+  directly from that JSON object, nothing else.
+- If no step's finding has a "dominant_driver" (it is null on every step), say so honestly:
+  from the LAST successful step's finding, pick either "max_row"+"max_share_pct" or
+  "min_row"+"min_share_pct" from ONE column in "per_column" (whichever direction matches what
+  the question is asking about), state that label/number/percentage, and say plainly that no
+  single dimension clearly dominates. Do NOT fabricate a clean single-driver story when the
+  data doesn't show one.
+- A single claim (one row's label + number + percentage) must ALL come from the SAME finding
+  object of the SAME step. Never combine a label from one step's finding with a number or
+  percentage from a different step's finding, and never combine a "max_row" label with a
+  "min_row" number (or vice versa) within the same column.
+- Every number you write must be a value that literally appears in the JSON (e.g. a
+  "max_share_pct" or "min_share_pct" field) -- never compute, combine, or round a percentage
+  yourself, even from real numbers that ARE in the JSON.
+- Quote period/category/city labels exactly as they appear in the JSON, character for character
+  (e.g. a label written "2018-07" must stay "2018-07", not become "July 2018").
+- Match your wording to the actual sign of the number you cite, regardless of how the question
+  was phrased: a positive value is a contributor/gain, never call it a "loss" or a "drop" just
+  because the question asked about one. If the question asked for a loss/decline driver and
+  every candidate value is positive, say plainly that nothing in the data shows a loss/decline,
+  and describe the cited row as the largest (or smallest) contributor instead.
+- Be concise: 2-4 sentences."""
+
+
+def compute_step_finding(df: pd.DataFrame) -> dict:
+    """Deterministically compute the salient facts from a drill-down step's result: for each
+    numeric column, the row with the largest-magnitude value and its share of the column's
+    total absolute magnitude across all rows. This is the "don't trust the 7B to eyeball which
+    row moved most" step -- the model only ever sees these code-computed numbers, never the
+    raw table itself.
+
+    "dominant_driver" is set when a single row's magnitude accounts for >= DRIVER_DOMINANCE_PCT
+    of a breakdown's total magnitude (only evaluated when there's more than one row -- a single
+    aggregate row isn't a "driver" of anything).
+    """
+    if df.empty:
+        return {"row_count": 0, "numeric_columns": [], "label_columns": [], "per_column": {}, "dominant_driver": None}
+
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    label_cols = [c for c in df.columns if c not in numeric_cols]
+
+    per_column: dict = {}
+    dominant_driver = None
+    for col in numeric_cols:
+        series = df[col].dropna()
+        if series.empty:
+            continue
+        total_abs = float(series.abs().sum())
+        max_idx, min_idx = series.idxmax(), series.idxmin()
+        max_row = json.loads(df.loc[max_idx].to_json())
+        min_row = json.loads(df.loc[min_idx].to_json())
+        # Every row-and-percentage pair the model might want to cite is pre-computed here as a
+        # literal field, so the synthesis step never has to do its own arithmetic (which it has
+        # been observed to get wrong) -- it only ever copies a *_share_pct value straight out.
+        # A single-row result has nothing to share against, so leave the pct undefined rather
+        # than reporting a trivially-true (and misleading) 100%.
+        has_comparison = len(series) > 1
+        max_share_pct = round(abs(float(series[max_idx])) / total_abs * 100, 1) if total_abs and has_comparison else None
+        min_share_pct = round(abs(float(series[min_idx])) / total_abs * 100, 1) if total_abs and has_comparison else None
+        extreme_kind = "max" if abs(series[max_idx]) >= abs(series[min_idx]) else "min"
+        extreme_row = max_row if extreme_kind == "max" else min_row
+        extreme_share_pct = max_share_pct if extreme_kind == "max" else min_share_pct
+
+        stats = {
+            "total": float(series.sum()),
+            "max_row": max_row,
+            "max_share_pct": max_share_pct,
+            "min_row": min_row,
+            "min_share_pct": min_share_pct,
+            "extreme_row": extreme_row,
+            "extreme_kind": extreme_kind,
+            "extreme_share_pct": extreme_share_pct,
+        }
+        per_column[col] = stats
+        share_pct = extreme_share_pct
+
+        if dominant_driver is None and len(df) > 1 and share_pct is not None and share_pct >= DRIVER_DOMINANCE_PCT:
+            dominant_driver = {"column": col, **stats}
+
+    return {
+        "row_count": len(df),
+        "numeric_columns": numeric_cols,
+        "label_columns": label_cols,
+        "per_column": per_column,
+        "dominant_driver": dominant_driver,
+    }
+
+
+def parse_drill_step(content: str | None) -> tuple[str | None, str | None]:
+    """Parse a drill-down step's {"reason": ..., "sql": ...} JSON out of free-text model
+    output, tolerating a fenced ```json block or a bare ```sql block with the reason as
+    the preceding prose (mirrors extract_fallback_tool_call's tolerance for this model)."""
+    text = (content or "").strip()
+    if not text:
+        return None, None
+
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict) and obj.get("sql"):
+            return obj.get("reason"), obj["sql"]
+    except json.JSONDecodeError:
+        pass
+
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    if fence:
+        try:
+            obj = json.loads(fence.group(1))
+            if isinstance(obj, dict) and obj.get("sql"):
+                return obj.get("reason"), obj["sql"]
+        except json.JSONDecodeError:
+            pass
+
+    sql_fence = SQL_FENCE_RE.search(text)
+    if sql_fence:
+        reason_text = text[: sql_fence.start()].strip() or None
+        return reason_text, sql_fence.group(1).strip()
+
+    return text or None, None
+
+
+def build_drill_user_prompt(question: str, steps: list[dict], history: list[dict] | None = None) -> str:
+    lines = []
+    if not steps and history:
+        lines.append("Recent conversation (context only -- the drill-down itself must stand on its own queries):")
+        for turn in history[-4:]:
+            lines.append(f"  {turn.get('role')}: {turn.get('content')}")
+        lines.append("")
+    lines.append(f"Root-cause question: {question}")
+    lines.append("")
+    if not steps:
+        lines.append("This is step 1 of at most {}. Propose the first breakdown query.".format(MAX_WHY_STEPS))
+    else:
+        lines.append("Findings so far (computed by code from actual query results -- ground truth):")
+        for s in steps:
+            lines.append(f"- Step {s['step']}: reason={s['reason']!r}")
+            lines.append(f"  sql: {s['sql']}")
+            if s.get("error"):
+                lines.append(f"  error: {s['error']}")
+            elif s.get("finding") is not None:
+                lines.append(f"  finding: {json.dumps(s['finding'], default=str)}")
+        lines.append("")
+        if steps[-1].get("error"):
+            lines.append(
+                f"IMPORTANT: step {steps[-1]['step']}'s SQL FAILED with the error shown above. Read "
+                "the error message and fix the actual problem it names (e.g. add a missing JOIN, "
+                "correct a column/table name) -- do NOT resubmit that same SQL unchanged."
+            )
+        lines.append(
+            f"Propose step {len(steps) + 1} of at most {MAX_WHY_STEPS}, narrowing further based on "
+            "the findings above. Do not repeat a breakdown already listed."
+        )
+    return "\n".join(lines)
+
+
+def synthesize_why_conclusion(
+    question: str,
+    steps: list[dict],
+    client: OpenAI,
+    temperature: float | None = None,
+    seed: int | None = None,
+) -> str:
+    """Write the final root-cause conclusion strictly from the drill steps' computed
+    findings -- same anti-hallucination discipline as synthesize_final_answer()."""
+    successful_steps = [s for s in steps if s.get("finding") is not None and not s.get("error")]
+    if not successful_steps:
+        last_error = next((s["error"] for s in reversed(steps) if s.get("error")), None)
+        if last_error:
+            return f"I couldn't complete a drill-down query, so I can't identify a driver. Last error: {last_error}"
+        return "I couldn't complete a drill-down query, so I can't identify a driver."
+
+    hit_step_limit = len(steps) >= MAX_WHY_STEPS and not any(
+        s.get("finding", {}).get("dominant_driver") for s in successful_steps
+    )
+    payload = {
+        "question": question,
+        "steps": [
+            {
+                "step": s["step"],
+                "reason": s["reason"],
+                "sql": s["sql"],
+                "row_count": s.get("row_count"),
+                "finding": s.get("finding"),
+            }
+            for s in successful_steps
+        ],
+        "hit_step_limit_without_isolating_a_driver": hit_step_limit,
+    }
+
+    # Code-computed sign check: the model has repeatedly mislabeled a positive dominant_driver
+    # as a "loss"/"decline" when the question used that wording, despite a system-prompt
+    # instruction against it -- a deterministic check placed right next to the data it's
+    # about is far more reliably followed than a rule buried in the system prompt.
+    dominant = next(
+        (s["finding"]["dominant_driver"] for s in successful_steps if s.get("finding", {}).get("dominant_driver")),
+        None,
+    )
+    if dominant and NEGATIVE_INTENT_RE.search(question):
+        value = dominant["extreme_row"].get(dominant["column"])
+        if isinstance(value, (int, float)) and value > 0:
+            payload["sign_check"] = (
+                "The question asks about a loss/decline, but this dominant_driver's value is "
+                "POSITIVE (a gain/contributor, not a loss). State this plainly -- do not call "
+                "it a loss."
+            )
+    messages = [
+        {"role": "system", "content": WHY_SYNTHESIS_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Drill-down data (JSON -- the ONLY source of truth for your answer):\n"
+                f"{json.dumps(payload, default=str)}"
+            ),
+        },
+    ]
+    kwargs: dict = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
+    response = client.chat.completions.create(model=LLM_MODEL, messages=messages, **kwargs)
+    return response.choices[0].message.content or "(no conclusion produced)"
+
+
+def answer_why(
+    question: str,
+    history: list[dict] | None = None,
+    client: OpenAI | None = None,
+    temperature: float | None = 0,
+    seed: int | None = 0,
+) -> dict:
+    """Bounded root-cause drill-down over the same guardrailed run_sql tool used by
+    answer_question(). At most MAX_WHY_STEPS sub-queries, each justified by a one-line reason;
+    after every step a code-computed "finding" (never the model's own eyeballing) decides
+    whether a dominant driver has been isolated. Stops early on isolation, else after the cap.
+
+    Returns {"answer_text": str, "steps": list[dict], "sql": str | None, "rows": list[dict]}.
+    `steps` is the inspectable reasoning trace: each entry has step, reason, sql, row_count,
+    finding (or error).
+    """
+    if detect_prompt_injection(question):
+        result = _refusal("refused: prompt-injection pattern detected in question")
+        return {"answer_text": result["answer_text"], "steps": [], "sql": None, "rows": []}
+
+    client = client or build_client()
+    con = duckdb.connect(DB_PATH, read_only=True)
+    run_sql = make_run_sql(con)
+
+    steps: list[dict] = []
+    last_sql: str | None = None
+    last_df = pd.DataFrame()
+
+    kwargs: dict = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
+
+    try:
+        semantic_layer = load_semantic_layer_text()
+        system_prompt = DRILL_SYSTEM_PROMPT.format(max_steps=MAX_WHY_STEPS, semantic_layer=semantic_layer)
+
+        for step_num in range(1, MAX_WHY_STEPS + 1):
+            user_prompt = build_drill_user_prompt(question, steps, history)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            response = client.chat.completions.create(model=LLM_MODEL, messages=messages, **kwargs)
+            content = response.choices[0].message.content
+            reason, sql = parse_drill_step(content)
+
+            if not sql:
+                steps.append(
+                    {
+                        "step": step_num,
+                        "reason": reason or "(model gave no reason)",
+                        "sql": None,
+                        "error": "could not parse a SQL query from the model's response",
+                        "finding": None,
+                    }
+                )
+                continue  # let the model try again next step, same self-correct spirit as answer_question
+
+            sql = unescape_sql_operators(sql)
+            try:
+                result = run_sql(sql)
+            except (SQLGuardError, duckdb.Error) as exc:
+                steps.append(
+                    {"step": step_num, "reason": reason, "sql": sql, "error": str(exc), "finding": None}
+                )
+                continue  # self-correct: the error is fed back into the next step's prompt
+
+            df = result["df"]
+            last_sql, last_df = result["sql"], df
+            finding = compute_step_finding(df)
+            steps.append(
+                {
+                    "step": step_num,
+                    "reason": reason or "(model gave no reason)",
+                    "sql": result["sql"],
+                    "row_count": len(df),
+                    "finding": finding,
+                }
+            )
+            if finding.get("dominant_driver"):
+                break
+
+        conclusion = synthesize_why_conclusion(question, steps, client, temperature=temperature, seed=seed)
+        return {
+            "answer_text": conclusion,
+            "steps": steps,
+            "sql": last_sql,
+            "rows": last_df.to_dict(orient="records"),
+        }
+    finally:
+        con.close()
+
+
+def format_why_trace(steps: list[dict]) -> str:
+    """Render the drill-down reasoning trace: step, reason, SQL, key finding -- the
+    inspectable chain behind the final conclusion."""
+    lines = []
+    for s in steps:
+        lines.append(f"Step {s['step']}: {s['reason']}")
+        lines.append(f"  SQL: {s['sql']}")
+        if s.get("error"):
+            lines.append(f"  -> error: {s['error']}")
+            continue
+        finding = s.get("finding") or {}
+        dominant = finding.get("dominant_driver")
+        if dominant:
+            lines.append(
+                f"  -> finding: dominant driver in {dominant['column']!r} "
+                f"({dominant['extreme_share_pct']}% of total magnitude): {dominant['extreme_row']}"
+            )
+        elif finding.get("row_count") == 1:
+            per_column = finding.get("per_column", {})
+            single = ", ".join(f"{col}={stats['max_row'].get(col)}" for col, stats in per_column.items())
+            lines.append(f"  -> finding: single row ({single}) -- no other rows to compare a share against")
+        else:
+            per_column = finding.get("per_column", {})
+            summary = ", ".join(
+                f"{col}: extreme={stats['extreme_row']} ({stats['extreme_share_pct']}%)"
+                for col, stats in per_column.items()
+            )
+            lines.append(f"  -> finding: {summary or '(no numeric columns to summarize)'}")
+    return "\n".join(lines)
+
+
 def _refusal(reason: str) -> dict:
     return {
         "answer_text": (
@@ -573,16 +1000,23 @@ def repl() -> None:
         if question.lower() in {"exit", "quit"}:
             break
 
-        result = answer_question(question, history=history, client=client)
+        if is_why_question(question):
+            result = answer_why(question, history=history, client=client)
+            if result["steps"]:
+                print("\nREASONING TRACE:")
+                print(format_why_trace(result["steps"]))
+            print(f"\n{result['answer_text']}\n")
+        else:
+            result = answer_question(question, history=history, client=client)
 
-        print(f"\n{result['answer_text']}\n")
-        if result["sql"]:
-            print("SQL:")
-            print(result["sql"])
-            print()
-        if result["rows"]:
-            print(format_table(result["rows"]))
-            print()
+            print(f"\n{result['answer_text']}\n")
+            if result["sql"]:
+                print("SQL:")
+                print(result["sql"])
+                print()
+            if result["rows"]:
+                print(format_table(result["rows"]))
+                print()
 
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": result["answer_text"]})

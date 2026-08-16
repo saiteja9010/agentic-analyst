@@ -1,0 +1,12 @@
+version: 1
+description: >
+  Root-cause / drill-down demo questions for answer_why() (Phase 7, part 1). These are
+  open-ended "why" questions with no single gold SQL to diff against -- unlike
+  questions.yaml, this file is NOT an execution-accuracy set. run_why.py runs each
+  question through the bounded drill-down loop and prints the full reasoning trace plus
+  final conclusion for manual inspection: every number in the conclusion should trace
+  back to a finding computed from a query that actually ran.
+
+questions:
+  - q: Why did total profit differ across categories -- what's the biggest loss driver?
+  - q: Which month drove the biggest revenue change and why?
