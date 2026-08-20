@@ -107,6 +107,47 @@ def detect_prompt_injection(question: str) -> bool:
     return any(pattern.search(question) for pattern in INJECTION_PATTERNS)
 
 
+DESTRUCTIVE_INTENT_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"^\s*(please\s+)?(can\s+you\s+)?(delete|drop|truncate|remove|wipe|erase|destroy|clear|update|alter|insert)\b",
+        r"\bdelete\s+all\b",
+        r"\bdrop\s+(the\s+)?(table|database|schema)\b",
+        r"\btruncate\s+(the\s+)?table\b",
+        r"\bremove\s+all\b",
+        r"\bwipe\s+(the\s+)?(data|database|table)\b",
+        r"\binsert\s+into\b",
+        r"\balter\s+(the\s+)?table\b",
+        r"\bupdate\s+.*\bset\b",
+    ]
+]
+
+DESTRUCTIVE_REFUSAL_TEXT = (
+    "I can only read and analyze the data — I can't modify, delete, or alter it. "
+    "Try a question like 'total revenue by state'."
+)
+
+
+def detect_destructive_intent(question: str) -> bool:
+    """Input-side guard: refuses a question expressing destructive/DML/DDL intent (delete,
+    drop, truncate, remove all, wipe, update, alter, insert) BEFORE any LLM call or SQL
+    generation -- defense-in-depth alongside the SQL-level guardrails in
+    validate_and_prepare_sql(), which only ever see model-generated SQL, never the raw
+    question. Matches leading verbs / clear destructive phrasing rather than bare substrings,
+    so a legitimate question like "which orders were updated last month" (no leading
+    destructive verb, no "update ... set") does not false-trigger."""
+    return any(pattern.search(question or "") for pattern in DESTRUCTIVE_INTENT_PATTERNS)
+
+
+def _destructive_refusal() -> dict:
+    return {
+        "answer_text": DESTRUCTIVE_REFUSAL_TEXT,
+        "sql": None,
+        "rows": [],
+        "trace": ["refused: destructive intent detected in question"],
+    }
+
+
 def validate_and_prepare_sql(query: str) -> str:
     """Enforce: single statement, SELECT/WITH only, no forbidden keywords, has a LIMIT."""
     q = (query or "").strip()
@@ -822,6 +863,9 @@ def answer_why(
     `steps` is the inspectable reasoning trace: each entry has step, reason, sql, row_count,
     finding (or error).
     """
+    if detect_destructive_intent(question):
+        return {"answer_text": DESTRUCTIVE_REFUSAL_TEXT, "steps": [], "sql": None, "rows": []}
+
     if detect_prompt_injection(question):
         result = _refusal("refused: prompt-injection pattern detected in question")
         return {"answer_text": result["answer_text"], "steps": [], "sql": None, "rows": []}
@@ -1004,6 +1048,9 @@ def answer_question(
     for deterministic eval runs); None uses the provider default for each.
     """
     history = history or []
+
+    if detect_destructive_intent(question):
+        return _destructive_refusal()
 
     if detect_prompt_injection(question):
         return _refusal("refused: prompt-injection pattern detected in question")
