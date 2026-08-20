@@ -1,13 +1,3 @@
----
-title: Autonomous Analyst
-emoji: 📊
-colorFrom: blue
-colorTo: indigo
-sdk: streamlit
-app_file: src/app.py
-pinned: false
----
-
 # Autonomous Analyst
 
 Autonomous Analyst — an agentic text-to-SQL system that answers business questions over an
@@ -187,9 +177,10 @@ output from a live run, not illustrative text; reproduce it with `python src/eva
   ` ```sql``` ` block as plain text, so a fallback parser (`extract_fallback_tool_call()`)
   recovers either form. Groq's `openai/gpt-oss-120b` emits proper structured tool calls
   natively — confirmed live during the provider swap, no fallback path needed at all.
-- **Free-tier hosting note.** The hosted demo runs on a free Hugging Face Space and Groq's free
-  API tier — expect a cold-start delay if the Space has been idle, and occasional slow or failed
-  responses under Groq's free-tier rate limits.
+- **Free-tier hosting note.** The hosted demo runs on Streamlit Community Cloud's free tier and
+  Groq's free API tier — expect a cold-start delay if the app has been idle (Streamlit Cloud
+  sleeps inactive free-tier apps), and occasional slow or failed responses under Groq's
+  free-tier rate limits.
 - **The eval set is small and hand-built** — 15 questions across 3 difficulty tiers, not a large
   published benchmark. It's a real, reproducible signal on this schema, stated at that scope and
   no larger.
@@ -243,22 +234,28 @@ python src/eval/run_why.py    # prints the two demo root-cause traces end to end
 Secrets (API keys) only ever live in `.env`, which is gitignored — `.env.example` is the
 committed template with placeholder values.
 
-### Deploying your own Space
+### Deploying your own instance
 
-The live demo above runs on a free [Hugging Face Space](https://huggingface.co/spaces) (Streamlit
-SDK) against Groq. To deploy your own:
+The live demo above runs on [Streamlit Community Cloud](https://share.streamlit.io), deployed
+directly from this GitHub repo, against Groq. To deploy your own:
 
-1. Create a new Space — SDK: **Streamlit**, hardware: free CPU basic. This repo's own
-   `README.md` already carries the required Spaces YAML frontmatter at the very top
-   (`sdk: streamlit`, `app_file: src/app.py`, ...), so no separate Space-side README needs to be
-   hand-written.
-2. Push this repo's contents to the Space's git remote (or link the Space to sync from this
-   GitHub repo, from the Space's Settings page).
-3. In the Space's **Settings → Repository secrets**, set `LLM_BASE_URL`, `LLM_MODEL`, and
-   `LLM_API_KEY` (e.g. the Groq values from Option B above) — the Space never gets a `.env` file,
-   so these three env vars are how it configures the same provider-agnostic client used locally.
-4. Nothing else to build by hand: `data/raw/*.csv` are committed (small, public Ben Roshan data,
-   ~90KB total), and `src/app.py` calls `ingest.py` automatically on cold start whenever
-   `data/warehouse.duckdb` is missing — which it always is on a fresh Space checkout, since that
-   file itself stays gitignored. First load after each Space (re)build is a few seconds slower
-   for this one-time build; every load after that reuses the same warehouse file.
+1. Fork or push this repo to your own GitHub account, then go to
+   [share.streamlit.io](https://share.streamlit.io) → **New app** and pick that repo/branch.
+2. Set **main file path** to `src/app.py`. In the app's Python-version picker, use **Python
+   3.12** (Streamlit Community Cloud's own supported runtime for a new app — separate from the
+   3.14 this repo is developed/tested against locally; `requirements.txt` installs cleanly on
+   either).
+3. Before deploying, open **Advanced settings → Secrets** and add the three provider env vars as
+   a TOML block — the app never gets a `.env` file, so this is how it configures the same
+   provider-agnostic client used locally (e.g. the Groq values from Option B above):
+   ```toml
+   LLM_BASE_URL = "https://api.groq.com/openai/v1"
+   LLM_MODEL = "openai/gpt-oss-120b"
+   LLM_API_KEY = "gsk_your_own_key"
+   ```
+4. Deploy. Nothing else to build by hand: `data/raw/*.csv` are committed (small, public Ben
+   Roshan data, ~90KB total), and `src/app.py` calls `ingest.py` automatically at startup
+   whenever `data/warehouse.duckdb` is missing — which it always is on a fresh clone, since that
+   file itself stays gitignored. First load after each (re)deploy is a few seconds slower for
+   this one-time build; every load after that reuses the same warehouse file.
+5. Every push to the connected branch triggers an automatic redeploy — no manual rebuild step.
