@@ -14,9 +14,12 @@ Autonomous Analyst — an agentic text-to-SQL system that answers business quest
 Indian e-commerce warehouse, with a semantic layer, guardrails, honest root-cause drill-down,
 and a measured evaluation.
 
-**Live demo:** [DEMO_URL] — runs on local Ollama 7B in dev, Groq Llama-3.3-70B in the hosted
-demo, swapped via 3 env vars (the LLM client is provider-agnostic by design; see
-[Setup / running it](#setup--running-it)).
+**Live demo:** [https://agentic-analyst.streamlit.app/](https://agentic-analyst.streamlit.app/) —
+runs on local Ollama 7B in dev, Groq `openai/gpt-oss-120b` in the hosted demo, swapped via 3 env
+vars (the LLM client is provider-agnostic by design; see
+[Setup / running it](#setup--running-it)). *(Hosted model migrated from
+`llama-3.3-70b-versatile` after Groq deprecated it on 2026-08-16 — see
+[The eval story](#the-eval-story) for the re-measured numbers on the new model.)*
 
 ![Root-cause reasoning trace](docs/img/why_trace.png)
 ![Normal answer with SQL and table](docs/img/normal_answer.png)
@@ -116,13 +119,25 @@ adds one extra derived `missed_target` boolean column beyond what the gold query
 mismatch, not a content error — kept as a fail anyway, because loosening the harness the moment
 it catches something would defeat the point of having one.
 
-**Groq `llama-3.3-70b-versatile`, same harness, same questions, only the env vars changed:**
+**Groq `openai/gpt-oss-120b`, same harness, same questions, only the env vars changed** (the
+hosted model was migrated here after Groq deprecated `llama-3.3-70b-versatile` on 2026-08-16 —
+the earlier 15/15 run was against that now-retired model and is no longer reproducible against a
+live endpoint):
 
-**15/15 (100.0%)** — including the question the 7B always missed (it wrote exactly the columns
-the gold query asks for, no more).
+**13/15 (86.7%)** — easy 4/4, medium 6/6, hard 3/5. Two hard-tier misses, both real shape/framing
+issues rather than wrong logic: *"Which category-months missed their sales target?"* — the join
+and filter are correct (exactly the right 20 category-month pairs), but the query selects only
+`[category, month_key]`, dropping the `actual_revenue`/`target` columns the gold query also
+returns — the same column-shape-mismatch failure mode the local 7B hit, just in the opposite
+direction (there it added an extra column; here it drops two required ones). *"What was the
+month-over-month revenue growth percentage?"* — the underlying SQL correctly computes and
+returns the full 12-month series (no `LIMIT`, right values), but the synthesized answer text
+narrates only the most recent month's growth (53.4% for 2019-03) instead of the whole trend —
+the same "collapsed to the latest period" failure Phase 6 fixed for the local 7B, resurfacing
+here in synthesis rather than SQL generation.
 
 Both runs are committed as evidence, not just claimed: [`src/eval/report_ollama.json`](src/eval/report_ollama.json)
-(14/15) and [`src/eval/report_groq.json`](src/eval/report_groq.json) (15/15).
+(14/15) and [`src/eval/report_groq.json`](src/eval/report_groq.json) (13/15).
 
 ## Root-cause drill-down
 
@@ -170,7 +185,7 @@ output from a live run, not illustrative text; reproduce it with `python src/eva
 - **`qwen2.5-coder:7b` via Ollama advertises tool-calling support but doesn't reliably populate
   it.** It instead emits a raw `{"name": "run_sql", "arguments": {...}}` JSON blob or a fenced
   ` ```sql``` ` block as plain text, so a fallback parser (`extract_fallback_tool_call()`)
-  recovers either form. Groq's `llama-3.3-70b-versatile` emits proper structured tool calls
+  recovers either form. Groq's `openai/gpt-oss-120b` emits proper structured tool calls
   natively — confirmed live during the provider swap, no fallback path needed at all.
 - **Free-tier hosting note.** The hosted demo runs on a free Hugging Face Space and Groq's free
   API tier — expect a cold-start delay if the Space has been idle, and occasional slow or failed
@@ -211,7 +226,7 @@ ollama serve   # if not already running
 
 ```bash
 LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_MODEL=llama-3.3-70b-versatile
+LLM_MODEL=openai/gpt-oss-120b
 LLM_API_KEY=gsk_your_own_key   # keep this in .env, gitignored -- never commit it
 ```
 
