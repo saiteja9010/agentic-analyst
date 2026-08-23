@@ -11,9 +11,6 @@ vars (the LLM client is provider-agnostic by design; see
 `llama-3.3-70b-versatile` after Groq deprecated it on 2026-08-16 — see
 [The eval story](#the-eval-story) for the re-measured numbers on the new model.)*
 
-![Root-cause reasoning trace](docs/img/why_trace.png)
-![Normal answer with SQL and table](docs/img/normal_answer.png)
-![Chart output](docs/img/chart.png)
 
 ## What it does
 
