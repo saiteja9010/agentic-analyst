@@ -11,7 +11,7 @@ Usage: python src/eval/run_eval.py (or: python -m src.eval.run_eval from repo ro
 Every run overwrites report.json, which is gitignored (a local scratch artifact of whatever
 provider you last ran against -- not committed, not authoritative). The two checked-in,
 provider-labelled snapshots are report_ollama.json (qwen2.5-coder:7b, local, 14/15) and
-report_groq.json (llama-3.3-70b-versatile via Groq, 15/15) -- copy report.json to the matching
+report_groq.json (openai/gpt-oss-120b via Groq, 13/15) -- copy report.json to the matching
 name after a run if you want to update one of those.
 """
 
