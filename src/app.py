@@ -230,8 +230,8 @@ def process_question(question: str, history: list[dict]) -> dict:
     """Route the question through the existing agent functions and package whatever they
     return into a plain dict the UI can render. Any unexpected exception is caught here so the
     UI never shows a stack trace -- the app itself never decides anything about the answer."""
-    client = get_client()
     try:
+        client = get_client()
         if is_why_question(question):
             result = answer_why(question, history=history, client=client, temperature=0, seed=0)
             key_step = pick_key_why_step(result["steps"]) if result["steps"] else None
